@@ -1,0 +1,357 @@
+<Window x:Class="MicSwitcher.App.PreferencesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="MicSwitcher 设置" Height="680" Width="760"
+        MinHeight="540" MinWidth="640"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize">
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="150"/>
+            <ColumnDefinition Width="12"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ===== 左侧分类导航 ===== -->
+        <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource Card}" Padding="6">
+            <ListBox x:Name="NavList" BorderThickness="0" Background="Transparent"
+                     SelectionChanged="Nav_SelectionChanged">
+                <ListBoxItem Content="启动" Tag="start" Padding="8,7"/>
+                <ListBoxItem Content="窗口与托盘" Tag="window" Padding="8,7"/>
+                <ListBoxItem Content="通知" Tag="notify" Padding="8,7"/>
+                <ListBoxItem Content="自动模式" Tag="auto" Padding="8,7"/>
+                <ListBoxItem Content="快捷键" Tag="hotkey" Padding="8,7"/>
+                <ListBoxItem Content="设备管理" Tag="device" Padding="8,7"/>
+                <ListBoxItem Content="关于" Tag="about" Padding="8,7"/>
+            </ListBox>
+        </Border>
+
+        <!-- ===== 右侧内容（可折叠分组） ===== -->
+        <ScrollViewer Grid.Row="0" Grid.Column="2" x:Name="ContentScroll"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+
+                <!-- 启动 -->
+                <Expander x:Name="SecStart" IsExpanded="True" Margin="0,0,0,8"
+              Padding="4,10">
+                    <Expander.Header>
+                        <TextBlock Text="启动" FontWeight="Bold"/>
+                    </Expander.Header>
+                    <StackPanel>
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="开机自启动" FontSize="13"/>
+                                <TextBlock Text="登录 Windows 后自动运行" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <CheckBox Grid.Column="1" x:Name="AutoStartToggle" Style="{StaticResource ToggleSwitch}"
+                                      Checked="AutoStart_Changed" Unchecked="AutoStart_Changed"/>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="启动时最小化到托盘" FontSize="13"/>
+                                <TextBlock Text="启动后不弹主窗口" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <CheckBox Grid.Column="1" x:Name="StartMinimizedToggle" Style="{StaticResource ToggleSwitch}"
+                                      Checked="StartMinimized_Changed" Unchecked="StartMinimized_Changed"/>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="开机自启延迟启动" FontSize="13"/>
+                                <TextBlock Text="等音频服务就绪后再初始化，避免识别不到麦克风" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <CheckBox Grid.Column="1" x:Name="DelayAutostartToggle" Style="{StaticResource ToggleSwitch}"
+                                      Checked="DelayAutostart_Changed" Unchecked="DelayAutostart_Changed"/>
+                        </Grid>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                            <TextBlock Text="延迟秒数：" FontSize="12" VerticalAlignment="Center"/>
+                            <Slider x:Name="DelaySecondsSlider" Width="180" Minimum="1" Maximum="60"
+                                    TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"
+                                    ValueChanged="DelaySeconds_Changed"/>
+                            <TextBlock x:Name="DelaySecondsText" Text="8 秒" FontSize="12" Margin="8,0,0,0"
+                                       VerticalAlignment="Center" Foreground="Gray"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
+
+                <!-- 窗口与托盘 -->
+                <Expander x:Name="SecWindow" Margin="0,0,0,8"
+              Padding="4,10">
+                    <Expander.Header>
+                        <TextBlock Text="窗口与托盘" FontWeight="Bold"/>
+                    </Expander.Header>
+                    <StackPanel>
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="关闭时最小化到托盘" FontSize="13" VerticalAlignment="Center"/>
+                            <CheckBox Grid.Column="1" x:Name="CloseToTrayToggle" Style="{StaticResource ToggleSwitch}"
+                                      Checked="CloseToTray_Changed" Unchecked="CloseToTray_Changed"/>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="显示托盘图标" FontSize="13"/>
+                                <TextBlock Text="关掉后托盘不留图标，再启动程序可唤出窗口" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <CheckBox Grid.Column="1" x:Name="ShowTrayIconToggle" Style="{StaticResource ToggleSwitch}"
+                                      Checked="ShowTrayIcon_Changed" Unchecked="ShowTrayIcon_Changed"/>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="托盘图标反映静音状态" FontSize="13"/>
+                                <TextBlock Text="静音时图标变灰并带红斜杠" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <CheckBox Grid.Column="1" x:Name="TrayMuteIconToggle" Style="{StaticResource ToggleSwitch}"
+                                      Checked="TrayMuteIcon_Changed" Unchecked="TrayMuteIcon_Changed"/>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="同步通信设备角色" FontSize="13"/>
+                                <TextBlock Text="切麦时同时改「通信」角色，会议软件才会跟随" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <CheckBox Grid.Column="1" x:Name="SyncCommToggle" Style="{StaticResource ToggleSwitch}"
+                                      Checked="SyncComm_Changed" Unchecked="SyncComm_Changed"/>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
+                <!-- 通知 -->
+                <Expander x:Name="SecNotify" Margin="0,0,0,8"
+              Padding="4,10">
+                    <Expander.Header>
+                        <TextBlock Text="通知" FontWeight="Bold"/>
+                    </Expander.Header>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <TextBlock Text="自动切换时弹提示" FontSize="13"/>
+                            <TextBlock Text="自动切到别的麦克风时弹气泡" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                        </StackPanel>
+                        <CheckBox Grid.Column="1" x:Name="NotifyToggle" Style="{StaticResource ToggleSwitch}"
+                                  Checked="Notify_Changed" Unchecked="Notify_Changed"/>
+                    </Grid>
+                </Expander>
+
+                <!-- 自动模式 -->
+                <Expander x:Name="SecAuto" Margin="0,0,0,8"
+              Padding="4,10">
+                    <Expander.Header>
+                        <TextBlock Text="自动模式灵敏度" FontWeight="Bold"/>
+                    </Expander.Header>
+                    <StackPanel>
+                        <TextBlock Text="静音阈值：低于它的声音算「没人说话」" Style="{StaticResource Hint}" Margin="0,0,0,4"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Slider x:Name="ThresholdSlider" Width="240" Minimum="0.5" Maximum="50"
+                                    TickFrequency="0.5" IsSnapToTickEnabled="True" VerticalAlignment="Center"
+                                    ValueChanged="Threshold_Changed"/>
+                            <TextBlock x:Name="ThresholdText" Text="1.0%" FontSize="12" Margin="8,0,0,0"
+                                       VerticalAlignment="Center" Foreground="Gray"/>
+                        </StackPanel>
+
+                        <TextBlock Text="防抖次数：连续多少个采样周期达标才切换" Style="{StaticResource Hint}" Margin="0,0,0,4"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Slider x:Name="DebounceSlider" Width="240" Minimum="1" Maximum="10"
+                                    TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"
+                                    ValueChanged="Debounce_Changed"/>
+                            <TextBlock x:Name="DebounceText" Text="3 次" FontSize="12" Margin="8,0,0,0"
+                                       VerticalAlignment="Center" Foreground="Gray"/>
+                        </StackPanel>
+
+                        <TextBlock Text="采样间隔：探测麦克风电平的频率" Style="{StaticResource Hint}" Margin="0,0,0,4"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <Slider x:Name="IntervalSlider" Width="240" Minimum="100" Maximum="1000"
+                                    TickFrequency="50" IsSnapToTickEnabled="True" VerticalAlignment="Center"
+                                    ValueChanged="Interval_Changed"/>
+                            <TextBlock x:Name="IntervalText" Text="300 ms" FontSize="12" Margin="8,0,0,0"
+                                       VerticalAlignment="Center" Foreground="Gray"/>
+                        </StackPanel>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="优先使用真实设备" FontSize="13"/>
+                                <TextBlock Text="家里都没声音时，别让虚拟声卡（Mic You / VB-Cable 等）一直占着默认麦"
+                                           Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <CheckBox Grid.Column="1" x:Name="PreferPhysicalToggle" Style="{StaticResource ToggleSwitch}"
+                                      Checked="PreferPhysical_Changed" Unchecked="PreferPhysical_Changed"/>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
+                <!-- 快捷键 -->
+                <Expander x:Name="SecHotkey" Margin="0,0,0,8"
+              Padding="4,10">
+                    <Expander.Header>
+                        <TextBlock Text="全局快捷键" FontWeight="Bold"/>
+                    </Expander.Header>
+                    <StackPanel>
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="启用全局热键" FontSize="13" VerticalAlignment="Center"/>
+                            <CheckBox Grid.Column="1" x:Name="HotkeyEnableToggle" Style="{StaticResource ToggleSwitch}"
+                                      Checked="HotkeyEnable_Changed" Unchecked="HotkeyEnable_Changed"/>
+                        </Grid>
+
+                        <TextBlock Text="每个动作都能单独开关；按下要用的组合键，或从下拉里选预设。改完立即生效。"
+                                   Style="{StaticResource Hint}" Margin="0,0,0,12"/>
+
+                        <!-- 静音 -->
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <CheckBox Grid.Column="0" x:Name="MuteEnabledToggle" Style="{StaticResource ToggleSwitch}"
+                                      Margin="0,0,10,0" Checked="MuteEnabled_Changed" Unchecked="MuteEnabled_Changed"/>
+                            <TextBlock Grid.Column="1" Text="静音 / 取消静音" FontSize="13" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Column="2" x:Name="HotkeyMuteBox" Margin="8,0,8,0"
+                                      SelectionChanged="HotkeyMute_Changed"/>
+                            <Button Grid.Column="3" Content="录制" Padding="10,4" Click="RecordMute_Click"/>
+                        </Grid>
+
+                        <!-- 下一个 -->
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <CheckBox Grid.Column="0" x:Name="NextEnabledToggle" Style="{StaticResource ToggleSwitch}"
+                                      Margin="0,0,10,0" Checked="NextEnabled_Changed" Unchecked="NextEnabled_Changed"/>
+                            <TextBlock Grid.Column="1" Text="下一个麦克风" FontSize="13" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Column="2" x:Name="HotkeyNextBox" Margin="8,0,8,0"
+                                      SelectionChanged="HotkeyNext_Changed"/>
+                            <Button Grid.Column="3" Content="录制" Padding="10,4" Click="RecordNext_Click"/>
+                        </Grid>
+
+                        <!-- 上一个 -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <CheckBox Grid.Column="0" x:Name="PrevEnabledToggle" Style="{StaticResource ToggleSwitch}"
+                                      Margin="0,0,10,0" Checked="PrevEnabled_Changed" Unchecked="PrevEnabled_Changed"/>
+                            <TextBlock Grid.Column="1" Text="上一个麦克风" FontSize="13" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Column="2" x:Name="HotkeyPrevBox" Margin="8,0,8,0"
+                                      SelectionChanged="HotkeyPrev_Changed"/>
+                            <Button Grid.Column="3" Content="录制" Padding="10,4" Click="RecordPrev_Click"/>
+                        </Grid>
+
+                        <TextBlock x:Name="RecordHint" Text="" Foreground="#FFD9534F"
+                                   Style="{StaticResource Hint}" Margin="0,10,0,0"/>
+                        <TextBlock x:Name="HotkeyStatusText" Text="" Foreground="#FFB8860B"
+                                   Style="{StaticResource Hint}" Margin="0,6,0,0"/>
+                    </StackPanel>
+                </Expander>
+
+                <!-- 设备管理 -->
+                <Expander x:Name="SecDevice" Margin="0,0,0,8"
+              Padding="4,10">
+                    <Expander.Header>
+                        <TextBlock Text="设备管理（别名 / 排除）" FontWeight="Bold"/>
+                    </Expander.Header>
+                    <StackPanel>
+                        <TextBlock Text="别名会用在托盘菜单和主窗口；勾选「排除」的设备不参与自动切换、也不进托盘菜单。"
+                                   Style="{StaticResource Hint}" Margin="0,0,0,10"/>
+                        <StackPanel x:Name="DeviceAdminPanel"/>
+                        <Button Content="刷新设备" Padding="12,5" HorizontalAlignment="Left" Margin="0,10,0,0"
+                                Click="RefreshDevices_Click"/>
+                    </StackPanel>
+                </Expander>
+
+                <!-- 关于 -->
+                <Expander x:Name="SecAbout" Margin="0,0,0,8"
+              Padding="4,10">
+                    <Expander.Header>
+                        <TextBlock Text="关于" FontWeight="Bold"/>
+                    </Expander.Header>
+                    <StackPanel>
+
+                        <!-- 图标 + 名称 + 版本 -->
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Image x:Name="AboutIcon" Grid.Column="0" Width="48" Height="48"
+                                   Margin="0,0,14,0" VerticalAlignment="Top"/>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock x:Name="AboutNameText" Text="MicSwitcher" FontSize="17" FontWeight="Bold"/>
+                                <TextBlock x:Name="AboutVersionText" Text="版本 v1.0.0" FontSize="12"
+                                           Foreground="#FF2EA04F" Margin="0,3,0,0"/>
+                                <TextBlock x:Name="AboutDescText" Style="{StaticResource Hint}" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- 作者 / 版权 -->
+                        <TextBlock x:Name="AboutAuthorText" FontSize="12" Margin="0,0,0,3"/>
+                        <TextBlock x:Name="AboutCopyrightText" Style="{StaticResource Hint}" Margin="0,0,0,14"/>
+
+                        <!-- 操作按钮 -->
+                        <WrapPanel>
+                            <Button x:Name="CheckUpdateButton" Content="🔍 检测更新" Padding="12,6"
+                                    Margin="0,0,8,8" Click="CheckUpdate_Click"/>
+                            <Button Content="📦 GitHub 项目" Padding="12,6" Margin="0,0,8,8"
+                                    Click="OpenRepo_Click"/>
+                            <Button Content="🐛 问题反馈" Padding="12,6" Margin="0,0,8,8"
+                                    Click="OpenIssues_Click"/>
+                            <Button Content="⭐ 点个 Star" Padding="12,6" Margin="0,0,8,8"
+                                    Click="OpenStar_Click"/>
+                            <Button x:Name="DonateButton" Content="☕ 打赏支持" Padding="12,6"
+                                    Margin="0,0,8,8" Click="OpenDonate_Click"/>
+                        </WrapPanel>
+
+                        <TextBlock x:Name="UpdateStatusText" Style="{StaticResource Hint}" Margin="0,4,0,0"/>
+
+                        <Border Height="1" Background="#FFEEEEEE" Margin="0,14,0,10"/>
+
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="参考过 SoundSwitch、MicMute、H.NotifyIcon 的实现思路；&#x0a;托盘与开机自启的行为参考了 CC Switch、Cherry Studio 的产品形态。"/>
+                    </StackPanel>
+                </Expander>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Margin="0,14,0,0">
+            <Button Content="关闭" Padding="18,6" Click="Close_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

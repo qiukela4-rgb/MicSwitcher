@@ -1,0 +1,9 @@
+# 统一换行：源码默认自动，Windows 脚本强制 CRLF
+* text=auto
+
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+
+*.png  binary
+*.ico  binary
