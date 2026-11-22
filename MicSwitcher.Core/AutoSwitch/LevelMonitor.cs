@@ -260,25 +260,21 @@ public sealed class LevelMonitor : IDisposable
 
     /// <summary>按优先级挑一个真实（非虚拟）设备；没有就返回 null。</summary>
     private AudioDeviceInfo? BestPhysical(IReadOnlyList<AudioDeviceInfo> devices)
-        => devices
-            .Where(d => !VirtualDeviceDetector.IsVirtual(d))
-            .OrderBy(d =>
-            {
-                int i = _priority.IndexOf(d.Id);
-                return i < 0 ? int.MaxValue : i;
-            })
-            .ThenByDescending(d => d.PeakValue)
-            .FirstOrDefault();
+    {
+        var id = RecoveryPolicy.SelectPhysicalBest(ToCandidates(devices), _priority);
+        return id is null ? null : devices.First(d => d.Id == id);
+    }
+
+    /// <summary>把设备快照转成恢复判定用的候选（虚拟/真实在这里一次性判好）。</summary>
+    private static List<RecoveryCandidate> ToCandidates(IReadOnlyList<AudioDeviceInfo> devices)
+        => devices.Select(d => new RecoveryCandidate(d.Id, d.PeakValue, VirtualDeviceDetector.IsVirtual(d))).ToList();
 
     /// <summary>默认设备消失时，立刻切到优先级最高的可用设备。</summary>
     private void RecoverFromMissingDefault(IReadOnlyList<AudioDeviceInfo> devices)
     {
-        var target = (_preferPhysical ? BestPhysical(devices) : null)
-            ?? devices.OrderBy(d =>
-            {
-                int i = _priority.IndexOf(d.Id);
-                return i < 0 ? int.MaxValue : i;
-            }).First();
+        var targetId = RecoveryPolicy.SelectRecoveryTarget(ToCandidates(devices), _priority, _preferPhysical);
+        if (targetId is null) return;
+        var target = devices.First(d => d.Id == targetId);
 
         lock (_switchLock)
         {

@@ -191,6 +191,7 @@ MicSwitcher/
 │   │   ├── DevicePeakReader.cs       # 每设备开共享模式 WasapiCapture 实测峰值
 │   │   └── VirtualDeviceDetector.cs  # 按设备名识别虚拟声卡
 │   ├── AutoSwitch/SwitchPolicy.cs    # 切换判定规则（纯函数，可单测）
+│   ├── AutoSwitch/RecoveryPolicy.cs  # 默认设备失效时选谁接手（纯函数，可单测）
 │   ├── AutoSwitch/LevelMonitor.cs    # 自动策略①：按电平选最佳麦
 │   ├── AutoSwitch/DeviceWatcher.cs   # 自动策略②：监听新麦克风接入
 │   ├── Locking/DefaultGuard.cs       # 锁定守护（IMMNotificationClient + 轮询兜底）
