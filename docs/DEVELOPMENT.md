@@ -190,6 +190,7 @@ MicSwitcher/
 │   │   ├── AudioDeviceService.cs     # 枚举/静音/切默认/读系统峰值表（基于 NAudio）
 │   │   ├── DevicePeakReader.cs       # 每设备开共享模式 WasapiCapture 实测峰值
 │   │   └── VirtualDeviceDetector.cs  # 按设备名识别虚拟声卡
+│   ├── AutoSwitch/SwitchPolicy.cs    # 切换判定规则（纯函数，可单测）
 │   ├── AutoSwitch/LevelMonitor.cs    # 自动策略①：按电平选最佳麦
 │   ├── AutoSwitch/DeviceWatcher.cs   # 自动策略②：监听新麦克风接入
 │   ├── Locking/DefaultGuard.cs       # 锁定守护（IMMNotificationClient + 轮询兜底）
@@ -225,6 +226,13 @@ MicSwitcher/
 3. 切完触发 `Switched` 事件，托盘弹气泡 + 刷新菜单。
 
 这些参数（采样间隔 / 静音阈值 / 防抖次数）可以在「设置 → 自动模式」里用滑杆调，改完立即生效。
+
+**判定规则是纯函数**：`SwitchPolicy.Evaluate()` 输入各设备的窗口平均电平与当前防抖状态，
+输出「切不切、切给谁、下一轮的防抖计数」，不碰 COM、不持状态；
+`LevelMonitor` 只负责枚举设备、读电平、执行 `SetDefaultEndpoint` 这些副作用。
+好处是判定表可以在任意环境（含 CI、无需音频设备）逐条断言——
+这段规则连续出过两次问题（虚拟声卡电平恒 0、默认设备失效死锁），以前只能靠真机试。
+测试见 `SwitchPolicyTests`，`tray-diag.log` 的「电平跟踪」行也会打印本轮判定原因。
 
 **为什么不用系统峰值表**：`IAudioMeterInformation.MasterPeakValue` 只反映「有没有客户端在使用该端点」，
 虚拟声卡（VB-Cable / Voicemeeter 的 CABLE Output）在没有程序采集时会**恒为 0**，

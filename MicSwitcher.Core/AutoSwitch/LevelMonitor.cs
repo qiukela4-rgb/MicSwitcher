@@ -163,81 +163,67 @@ public sealed class LevelMonitor : IDisposable
             }
         }
 
-        // 找窗口平均电平最高的设备
-        var best = averages.OrderByDescending(kv => kv.Value).First();
-        float bestAvg = best.Value;
-        float currentAvg = _currentWinnerId is not null && averages.TryGetValue(_currentWinnerId, out var ca) ? ca : 0f;
-
-        bool bestAudible = bestAvg >= _silenceThreshold;
-        // 相对判据：明显比当前设备响，也算“这边有人在说话”
-        // 明显更响（虚拟声卡电平常偏小，所以偏移量取很小，同时用 1.5 倍相对差防抖）
-        bool clearlyLouder = bestAvg >= _silenceThreshold * 0.5f && bestAvg >= currentAvg * 1.5f + 0.0005f;
-
-        if (++_sampleSeq % 20 == 0)
-        {
-            Trace?.Invoke("电平跟踪: " + string.Join(", ",
-                devices.Select(d => $"{d.FriendlyName}={averages.GetValueOrDefault(d.Id):0.0000}"))
-                + $" | 阈值={_silenceThreshold:0.0000} 最响={best.Key[..Math.Min(24, best.Key.Length)]}"
-                + $" 当前={(_currentWinnerId is null ? "null" : _currentWinnerId[..Math.Min(24, _currentWinnerId.Length)])}");
-        }
+        // 判定交给纯函数：规则与「枚举设备/设默认设备」的副作用分离，判定表可单测。
+        // 顺序沿用 devices（即优先级排序后的顺序），平局时靠前者胜，结果确定。
+        var levels = devices.Select(d => new DeviceLevel(d.Id, averages[d.Id])).ToList();
 
         lock (_switchLock)
         {
-            // 没人说话：重置防抖；如果现在占的是虚拟声卡，就换到真实设备上待命
-            if (!bestAudible && !clearlyLouder)
+            var decision = SwitchPolicy.Evaluate(
+                levels, _currentWinnerId, _pendingId, _pendingCount,
+                _silenceThreshold, _debounceSamples);
+
+            // 防抖状态按判定结果推进（Silent / SameAsCurrent 会清零，NewCandidate 重新计数）
+            _pendingId = decision.PendingId;
+            _pendingCount = decision.PendingCount;
+
+            if (++_sampleSeq % 20 == 0)
             {
-                _pendingId = null;
-                _pendingCount = 0;
+                Trace?.Invoke("电平跟踪: " + string.Join(", ",
+                    devices.Select(d => $"{d.FriendlyName}={averages.GetValueOrDefault(d.Id):0.0000}"))
+                    + $" | 阈值={_silenceThreshold:0.0000} 最响={ShortId(decision.BestId)}"
+                    + $" 当前={ShortId(_currentWinnerId)} 判定={decision.Reason}");
+            }
+
+            if (decision.Reason == DecisionReason.Silent)
+            {
+                // 没人说话：如果现在占的是虚拟声卡，就换到真实设备上待命
                 TryPreferPhysical(devices);
                 return;
             }
 
-            // 最强的还是当前赢家：重置防抖
-            if (best.Key == _currentWinnerId)
-            {
-                _pendingId = null;
-                _pendingCount = 0;
-                return;
-            }
+            if (decision.Action != SwitchAction.Switch || decision.BestId is null)
+                return;   // 无需切换，防抖状态已写回
 
-            // 出现了新的候选，做防抖计数
-            if (best.Key != _pendingId)
+            // 防抖通过，执行切换
+            var bestId = decision.BestId;
+            var to = devices.First(d => d.Id == bestId);
+            var from = devices.FirstOrDefault(d => d.Id == _currentWinnerId);
+            try
             {
-                _pendingId = best.Key;
-                _pendingCount = 1;
-                return;
-            }
+                _audio.SetDefaultDevice(bestId, SyncCommunicationRole);
+                _currentWinnerId = bestId;
 
-            _pendingCount++;
-            if (_pendingCount >= _debounceSamples)
-            {
-                // 防抖通过，执行切换
-                var to = devices.First(d => d.Id == best.Key);
-                var from = devices.FirstOrDefault(d => d.Id == _currentWinnerId);
-                try
+                if (from is not null)
                 {
-                    _audio.SetDefaultDevice(best.Key, SyncCommunicationRole);
-                    _currentWinnerId = best.Key;
-                    _pendingId = null;
-                    _pendingCount = 0;
-
-                    if (from is not null)
+                    Switched?.Invoke(this, new AutoSwitchEventArgs
                     {
-                        Switched?.Invoke(this, new AutoSwitchEventArgs
-                        {
-                            From = from,
-                            To = to,
-                            WinningLevel = best.Value,
-                        });
-                    }
+                        From = from,
+                        To = to,
+                        WinningLevel = averages.GetValueOrDefault(bestId),
+                    });
                 }
-                catch (Exception ex)
-                {
-                    Error?.Invoke(this, ex);
-                }
+            }
+            catch (Exception ex)
+            {
+                Error?.Invoke(this, ex);
             }
         }
     }
+
+    /// <summary>日志里只显示设备 id 的前 24 个字符。</summary>
+    private static string ShortId(string? id)
+        => id is null ? "null" : id[..Math.Min(24, id.Length)];
 
     /// <summary>
     /// 都没声音时，如果当前默认是「虚拟声卡」而又有真实设备可用，
