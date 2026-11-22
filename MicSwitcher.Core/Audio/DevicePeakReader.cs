@@ -20,6 +20,13 @@ public sealed class DevicePeakReader : IDisposable
     /// </summary>
     private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// 同一设备最多尝试启动多少次。
+    /// 设备被永久占用时无限重试只会反复创建/销毁采集流，白白增加线程与退出负担。
+    /// 10 次 × 5 秒 ≈ 50 秒，足够覆盖开机时音频服务尚未就绪的情况。
+    /// </summary>
+    private const int MaxAttempts = 10;
+
     private sealed class Channel
     {
         public WasapiCapture? Capture;
@@ -29,12 +36,15 @@ public sealed class DevicePeakReader : IDisposable
         /// <summary>失败是否值得重试。音频格式无法解码属于永久失败，重试没有意义。</summary>
         public bool Retryable = true;
 
+        /// <summary>已尝试启动的次数。</summary>
+        public int Attempts;
+
         public DateTime LastAttemptUtc;
     }
 
     private readonly Dictionary<string, Channel> _channels = new();
     private readonly object _gate = new();
-    private bool _disposed;
+    private volatile bool _disposed;
 
     /// <summary>保证 ids 里每个设备都有一条捕获通道；不在列表里的会被关掉。</summary>
     public void Sync(IEnumerable<string> deviceIds)
@@ -42,14 +52,16 @@ public sealed class DevicePeakReader : IDisposable
         if (_disposed) return;
 
         var wanted = deviceIds.ToHashSet();
+        var toStop = new List<Channel>();
+        var toStart = new Dictionary<string, int>();   // 设备 id → 已尝试次数
 
         lock (_gate)
         {
-            // 关掉不再需要的
+            // 关掉不再需要的（只改字典，真正停止放到锁外）
             foreach (var id in _channels.Keys.ToList())
             {
                 if (wanted.Contains(id)) continue;
-                StopChannel(_channels[id]);
+                toStop.Add(_channels[id]);
                 _channels.Remove(id);
             }
 
@@ -58,17 +70,39 @@ public sealed class DevicePeakReader : IDisposable
             {
                 if (_channels.TryGetValue(id, out var existing))
                 {
-                    if (existing.Failed && existing.Retryable
+                    if (existing.Failed && existing.Retryable && existing.Attempts < MaxAttempts
                         && DateTime.UtcNow - existing.LastAttemptUtc >= RetryInterval)
                     {
-                        StopChannel(existing);
-                        _channels[id] = StartChannel(id);
+                        toStop.Add(existing);
+                        _channels.Remove(id);
+                        toStart[id] = existing.Attempts;   // 沿用次数，避免无限重试
                     }
                     continue;
                 }
 
-                _channels[id] = StartChannel(id);
+                toStart[id] = 0;
             }
+        }
+
+        // 停止/启动都可能阻塞：StopRecording 要等采集线程收尾，而采集回调在
+        // DataAvailable 里要拿 _gate。持锁做这些操作就会两边互等 —— 退出时表现为
+        // 界面卡死、进程退不掉。必须在锁外执行。
+        foreach (var ch in toStop) StopChannel(ch);
+
+        foreach (var (id, attempts) in toStart)
+        {
+            if (_disposed) return;
+
+            var ch = StartChannel(id, attempts);
+
+            bool keep;
+            lock (_gate)
+            {
+                keep = !_disposed;
+                if (keep) _channels[id] = ch;
+            }
+
+            if (!keep) StopChannel(ch);
         }
     }
 
@@ -88,22 +122,27 @@ public sealed class DevicePeakReader : IDisposable
         }
     }
 
-    private Channel StartChannel(string deviceId)
+    private Channel StartChannel(string deviceId, int previousAttempts = 0)
     {
-        var channel = new Channel { LastAttemptUtc = DateTime.UtcNow };
+        var channel = new Channel
+        {
+            LastAttemptUtc = DateTime.UtcNow,
+            Attempts = previousAttempts + 1,
+        };
+        WasapiCapture? capture = null;
+
         try
         {
             using var enumerator = new MMDeviceEnumerator();
             var device = enumerator.GetDevice(deviceId);
 
-            var capture = new WasapiCapture(device);
+            capture = new WasapiCapture(device);
             var format = capture.WaveFormat;
 
             if (!IsSupported(format))
             {
                 // 解码不了时不能返回 0 —— 那会被上层当成「没人说话」。
                 // 标记为永久失败，让上层回退到系统峰值表。
-                capture.Dispose();
                 channel.Failed = true;
                 channel.Retryable = false;
                 return channel;
@@ -111,6 +150,7 @@ public sealed class DevicePeakReader : IDisposable
 
             capture.DataAvailable += (_, e) =>
             {
+                if (_disposed) return;
                 float p = ComputePeak(e.Buffer, e.BytesRecorded, format);
                 lock (_gate)
                 {
@@ -121,11 +161,19 @@ public sealed class DevicePeakReader : IDisposable
 
             capture.StartRecording();
             channel.Capture = capture;
+            capture = null;   // 所有权交给 channel，finally 不再释放
         }
         catch
         {
             channel.Failed = true;   // 打不开就回退到系统峰值表，稍后重试
         }
+        finally
+        {
+            // 启动失败时必须释放：否则每 5 秒重试一次就泄漏一条采集流，
+            // 线程数会随之上涨，退出时也更难停下来。
+            capture?.Dispose();
+        }
+
         return channel;
     }
 
@@ -241,13 +289,17 @@ public sealed class DevicePeakReader : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        List<Channel> toStop;
 
         lock (_gate)
         {
-            foreach (var ch in _channels.Values) StopChannel(ch);
+            if (_disposed) return;
+            _disposed = true;
+            toStop = _channels.Values.ToList();
             _channels.Clear();
         }
+
+        // 同 Sync：停止采集必须在锁外，否则会和 DataAvailable 回调互相等待。
+        foreach (var ch in toStop) StopChannel(ch);
     }
 }

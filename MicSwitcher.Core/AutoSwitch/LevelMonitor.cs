@@ -308,11 +308,15 @@ public sealed class LevelMonitor : IDisposable
 
     public void Dispose()
     {
-        _peakReader.Dispose();
         if (_disposed) return;
         _disposed = true;
+
+        // 先停采样再释放采集器：否则定时器回调可能正握着 _peakReader 在工作，
+        // 释放采集流时与采样线程并发，退出会变慢甚至卡住。
         _timer.Stop();
         _timer.Dispose();
         _windows.Clear();
+
+        _peakReader.Dispose();
     }
 }

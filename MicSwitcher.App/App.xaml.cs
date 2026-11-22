@@ -839,11 +839,55 @@ public partial class App : System.Windows.Application
     // ---------- 退出 ----------
     private void ExitApp()
     {
-        _settingsWindow?.AllowClose(); // 放行设置窗口的关闭拦截
-        UnregisterHotkeys();
-        _tray.Dispose();
-        _tray = null!;
-        _services.Dispose();
+        DiagLog("退出：开始");
+
+        // 先收起菜单：退出过程中 UI 线程若被占住，残留的菜单窗口会一直挂在屏幕上，
+        // 看起来就像程序没反应
+        try
+        {
+            if (_tray?.ContextMenu is { } menu) menu.IsOpen = false;
+            _settingsWindow?.AllowClose(); // 放行设置窗口的关闭拦截
+            UnregisterHotkeys();
+        }
+        catch (Exception ex)
+        {
+            DiagLog("退出：界面清理失败 " + ex.Message);
+        }
+
+        // 释放服务可能阻塞（要等音频采集流停下来）。放到后台线程并限时等待：
+        // 无论设备驱动是否响应，都要走到 Shutdown，不能让进程挂在退出上。
+        try
+        {
+            if (_initialized)
+            {
+                var dispose = System.Threading.Tasks.Task.Run(() =>
+                {
+                    try { _services.Dispose(); }
+                    catch (Exception ex) { DiagLog("退出：释放服务失败 " + ex.Message); }
+                });
+
+                if (dispose.Wait(TimeSpan.FromSeconds(3)))
+                    DiagLog("退出：服务已释放");
+                else
+                    DiagLog("退出：服务释放超时（采集流未在 3 秒内停止），继续退出");
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagLog("退出：释放服务异常 " + ex.Message);
+        }
+
+        try
+        {
+            _tray?.Dispose();
+            _tray = null!;
+        }
+        catch (Exception ex)
+        {
+            DiagLog("退出：销毁托盘失败 " + ex.Message);
+        }
+
+        DiagLog("退出：调用 Shutdown");
         Shutdown();
     }
 
@@ -855,6 +899,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        DiagLog("退出：OnExit");
         // 不主动 ReleaseMutex：进程退出时内核会自动释放命名互斥量，
         // 且 ReleaseMutex 只能在持有它的线程调用（OnExit 可能在其他线程，会抛异常）。
         UnregisterHotkeys();
