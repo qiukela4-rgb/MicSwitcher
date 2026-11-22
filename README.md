@@ -105,6 +105,7 @@ MicSwitcher 改成**对每个设备开一条共享模式的 `WasapiCapture`，�
 build.cmd    :: 编译
 test.cmd     :: 单元测试
 run.cmd      :: 编译并启动
+smoke.cmd    :: 启动冒烟：起得来、托盘建了、再自动关掉
 ```
 
 产物在 `MicSwitcher.App\bin\Debug\net8.0-windows\`。
