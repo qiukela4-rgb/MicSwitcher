@@ -33,6 +33,7 @@ jobs:
 
       - name: Package
         run: |
+          Move-Item -Path publish\MicSwitcher.App.exe -Destination publish\MicSwitcher.exe -Force
           Compress-Archive -Path publish\* -DestinationPath MicSwitcher-win-x64.zip -Force
         shell: pwsh
 
