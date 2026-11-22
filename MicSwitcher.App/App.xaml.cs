@@ -129,7 +129,7 @@ public partial class App : System.Windows.Application
         _services.ApplyStrategy(_config.AutoStrategy);
         _services.ApplyConfigToEngines();
         _services.AutoSwitched += OnAutoSwitched;
-        _services.Error += (_, ex) => ShowBalloon("自动切换出错", ex.Message);
+        _services.Error += (_, ex) => ShowBalloon("麦克风提示", ex.Message);
         _services.LevelMonitor.Trace = DiagLog;
 
         BuildTrayIcon();

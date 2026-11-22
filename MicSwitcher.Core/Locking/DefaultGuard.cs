@@ -69,17 +69,21 @@ public sealed class DefaultGuard : IDisposable, IMMNotificationClient
         if (string.IsNullOrWhiteSpace(deviceId))
             throw new ArgumentException("设备 ID 不能为空", nameof(deviceId));
 
+        // 先把要用的 COM 结果取好，再进锁。SetDefaultDevice 会触发
+        // OnDefaultDeviceChanged → Enforce → 同一把 _lock，持锁调用会自等。
+        var name = _audio.EnumerateDevices(AudioFlow.Capture)
+            .FirstOrDefault(d => d.Id == deviceId)?.FriendlyName ?? "(未知设备)";
+
         lock (_lock)
         {
             _lockedDeviceId = deviceId;
-            _lockedDeviceName = _audio.EnumerateDevices(AudioFlow.Capture)
-                .FirstOrDefault(d => d.Id == deviceId)?.FriendlyName ?? "(未知设备)";
+            _lockedDeviceName = name;
             _enabled = true;
-
-            // 立刻把默认设为锁定的设备
-            _audio.SetDefaultDevice(deviceId);
             _pollTimer.Start();
         }
+
+        // 锁外设默认设备
+        _audio.SetDefaultDevice(deviceId);
     }
 
     /// <summary>停止守护（保留当前默认设备不动）。</summary>
@@ -104,23 +108,37 @@ public sealed class DefaultGuard : IDisposable, IMMNotificationClient
     private void Enforce()
     {
         string? lockedId;
+        string? lockedName;
         lock (_lock)
         {
             if (!_enabled || _lockedDeviceId is null) return;
             lockedId = _lockedDeviceId;
+            lockedName = _lockedDeviceName;
+        }
+
+        var devices = _audio.EnumerateDevices(AudioFlow.Capture);
+
+        // 锁定的设备已经不在（被拔掉 / 被禁用）：守不住了。
+        // 不解锁的话，轮询会每秒尝试设一个不存在的设备、每秒抛一次异常，
+        // 用户还会以为一直是锁着的。
+        // 注意 devices 为空可能只是瞬时枚举失败（音频服务重启中），此时不能误解锁。
+        if (devices.Count > 0 && devices.All(d => d.Id != lockedId))
+        {
+            StopGuarding();
+            Error?.Invoke(this, new InvalidOperationException(
+                $"锁定的麦克风「{lockedName ?? lockedId}」已不可用，已自动解除锁定。"));
+            return;
         }
 
         var current = _audio.GetDefaultDeviceId(AudioFlow.Capture);
         if (current is null || current == lockedId) return;
 
         // 默认被改了 → 改回锁定的设备
-        string? intruder = _audio.EnumerateDevices(AudioFlow.Capture)
-            .FirstOrDefault(d => d.Id == current)?.FriendlyName;
+        string? intruder = devices.FirstOrDefault(d => d.Id == current)?.FriendlyName;
 
         _audio.SetDefaultDevice(lockedId);
 
-        var lockedInfo = _audio.EnumerateDevices(AudioFlow.Capture)
-            .FirstOrDefault(d => d.Id == lockedId);
+        var lockedInfo = devices.FirstOrDefault(d => d.Id == lockedId);
         if (lockedInfo is not null)
         {
             GuardTriggered?.Invoke(this, new GuardTriggeredEventArgs
