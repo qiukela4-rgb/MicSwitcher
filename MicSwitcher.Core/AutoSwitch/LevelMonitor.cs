@@ -39,6 +39,9 @@ public sealed class LevelMonitor : IDisposable
     private bool _enabled;
     private bool _disposed;
 
+    /// <summary>0 = 空闲，1 = 采样中。用门闩防止定时器回调重入。</summary>
+    private int _sampling;
+
     /// <summary>成功自动切换默认麦克风时触发（UI 线程外，需自行调度）。</summary>
     public event EventHandler<AutoSwitchEventArgs>? Switched;
 
@@ -114,6 +117,11 @@ public sealed class LevelMonitor : IDisposable
     private void SafeSample()
     {
         if (!_enabled) return;
+
+        // 设备多或 COM 卡顿时，一次采样可能超过定时器间隔。
+        // 不设门闩就会并发进来：窗口被重复累加、同一轮判两次、可能重复调用设默认设备。
+        if (Interlocked.CompareExchange(ref _sampling, 1, 0) != 0) return;
+
         try
         {
             Sample();
@@ -121,6 +129,10 @@ public sealed class LevelMonitor : IDisposable
         catch (Exception ex)
         {
             Error?.Invoke(this, ex);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _sampling, 0);
         }
     }
 
@@ -160,6 +172,17 @@ public sealed class LevelMonitor : IDisposable
                 q.Enqueue(dev.PeakValue);
                 while (q.Count > _windowSamples) q.Dequeue();
                 averages[dev.Id] = q.Average();
+            }
+        }
+
+        // 设备拔掉后它的滑动窗口再也不会被读到，长期运行（不切模式）会一直堆着，
+        // 顺手清掉。
+        if (_windows.Count > devices.Count)
+        {
+            var live = devices.Select(d => d.Id).ToHashSet();
+            foreach (var id in _windows.Keys)
+            {
+                if (!live.Contains(id)) _windows.TryRemove(id, out _);
             }
         }
 

@@ -29,6 +29,11 @@ public partial class PreferencesWindow : Window
     private bool _updatingHotkeyBoxes;
     private bool _syncingSliders;
 
+    // 滑杆拖动时 ValueChanged 每格触发一次，整份写盘太频繁（一次拖动几十次）。
+    // 写盘节流到 400ms，但「通知主程序应用配置」仍然立即执行，保证手感。
+    private readonly System.Windows.Threading.DispatcherTimer _saveDebounce;
+    private bool _saveDirty;
+
     /// <summary>任一设置发生变化（主程序据此立即应用）。</summary>
     public event EventHandler? Changed;
 
@@ -37,6 +42,16 @@ public partial class PreferencesWindow : Window
         _config = config;
         _services = services;
         InitializeComponent();
+
+        _saveDebounce = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(400),
+        };
+        _saveDebounce.Tick += (_, _) =>
+        {
+            _saveDebounce.Stop();
+            FlushSave();
+        };
 
         InitControls();
         BuildDeviceRows();
@@ -105,8 +120,28 @@ public partial class PreferencesWindow : Window
 
     private void Save()
     {
-        _config.Save();
+        // 立即生效：主程序要马上用新参数跑
         NotifyChanged();
+
+        // 落盘节流：连续拖动滑杆时只写最后一次
+        _saveDirty = true;
+        _saveDebounce.Stop();
+        _saveDebounce.Start();
+    }
+
+    /// <summary>立即落盘。关窗与退出前必须调用，否则最后一次改动会丢。</summary>
+    private void FlushSave()
+    {
+        if (!_saveDirty) return;
+        _saveDirty = false;
+        _config.Save();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _saveDebounce.Stop();
+        FlushSave();
+        base.OnClosed(e);
     }
 
     // ================= 左侧导航：展开对应分组 =================

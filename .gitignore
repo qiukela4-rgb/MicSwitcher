@@ -8,6 +8,8 @@ obj/
 # 运行时生成
 tray-diag.log
 settings.json
+settings.json.tmp
+settings.json.bad
 
 # 系统
 Thumbs.db

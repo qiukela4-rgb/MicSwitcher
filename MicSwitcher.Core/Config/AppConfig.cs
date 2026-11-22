@@ -129,6 +129,15 @@ public sealed class AppConfig
         }
         catch
         {
+            // 文件损坏时留个副本再从默认值开始：不然用户的所有设置会无声消失，
+            // 而且下次保存就把现场覆盖掉了。
+            try
+            {
+                if (File.Exists(ConfigPath))
+                    File.Copy(ConfigPath, ConfigPath + ".bad", overwrite: true);
+            }
+            catch { /* 备份失败也不影响启动 */ }
+
             return new AppConfig();
         }
     }
@@ -139,7 +148,12 @@ public sealed class AppConfig
         try
         {
             var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(ConfigPath, json);
+
+            // 先写临时文件再替换：直接覆盖写时若中途崩溃/断电，会留下半截 JSON，
+            // 下次启动就只能回退默认值。
+            var tmp = ConfigPath + ".tmp";
+            File.WriteAllText(tmp, json);
+            File.Move(tmp, ConfigPath, overwrite: true);
         }
         catch
         {
