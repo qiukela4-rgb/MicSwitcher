@@ -230,12 +230,30 @@ MicSwitcher/
 │   ├── Config/DeviceListOrdering.cs  # 排序 → 排除 → 别名（纯函数，可单测）
 │   ├── Locking/DefaultGuard.cs       # 锁定守护（IMMNotificationClient + 轮询兜底）
 │   └── Startup/AutoStart.cs          # 开机自启（Run 注册表键）
-├── MicSwitcher.App/             # WPF 外壳（托盘 + 设置窗口）
-│   ├── App.xaml(.cs)             # 托盘 + 单实例 + 热键 + 右键菜单
+├── MicSwitcher.App/             # WPF 外壳（托盘 + 两个窗口）
+│   ├── App.xaml(.cs)             # Application 生命周期 + 组合根（227 行）
 │   ├── AppServices.cs            # 服务容器 + 三模式互斥
-│   └── SettingsWindow.xaml(.cs)  # 设置窗口
-└── MicSwitcher.Tests/           # xunit 测试
+│   ├── AppMetadata.cs            # 程序名与版本号
+│   ├── DiagnosticsService.cs     # tray-diag.log、环境探测、完整性检查
+│   ├── NativeMethods.cs          # 全部 Win32 P/Invoke 集中处
+│   ├── SingleInstanceService.cs  # 单实例互斥量 + 唤醒事件
+│   ├── HotkeyService.cs          # 全局热键注册/注销/按签名重载
+│   ├── HotkeyProbe.cs            # 注册前探测组合键是否已被占用
+│   ├── TrayIconHost.cs           # 托盘图标、气泡、当前菜单引用
+│   ├── TrayMenuBuilder.cs        # 右键菜单构建
+│   ├── TrayCommands.cs           # 模式切换、切设备、轮换、静音、自启
+│   ├── SettingsWindow.xaml(.cs)  # 主窗口
+│   └── PreferencesWindow.xaml(.cs) # 详细设置窗口
+└── MicSwitcher.Tests/           # xunit 测试（103 个用例）
 ```
+
+> **重构进度（2026-11-22）**：`App.xaml.cs` 从 909 行拆到 227 行，分五批执行。
+> 已完成：批次 1（`NativeMethods` / `DiagnosticsService`）、2（`HotkeyService`）、
+> 3（`SingleInstanceService`）、4a（`TrayIconHost` / `TrayMenuBuilder`）、
+> 4b（`TrayCommands`）。
+> **批次 5 未开始**：`AppBootstrapper`（启动编排）、`SettingsWindowCoordinator`、
+> `ShutdownCoordinator` 三个类还没建，App 里仍留着 `ShowSettings` / `ApplyConfig` /
+> `ExitApp`。需在托盘与退出流程通过真机验收后再排。
 
 ## 核心技术 API
 

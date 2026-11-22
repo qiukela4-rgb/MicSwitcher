@@ -10,40 +10,22 @@ internal sealed class TrayMenuBuilder
 {
     private readonly TrayIconHost _host;
     private readonly AppServices _services;
-    private readonly Action<string> _switchTo;
-    private readonly Action _cycle;
-    private readonly Action _toggleMute;
-    private readonly Action _setManual;
-    private readonly Action<AutoStrategy> _setAuto;
-    private readonly Action _setLocked;
+    private readonly TrayCommands _commands;
     private readonly Action _showSettings;
     private readonly Action _exitApp;
-    private readonly Action<string, string> _showBalloon;
 
     internal TrayMenuBuilder(
         TrayIconHost host,
         AppServices services,
-        Action<string> switchTo,
-        Action cycle,
-        Action toggleMute,
-        Action setManual,
-        Action<AutoStrategy> setAuto,
-        Action setLocked,
+        TrayCommands commands,
         Action showSettings,
-        Action exitApp,
-        Action<string, string> showBalloon)
+        Action exitApp)
     {
         _host = host;
         _services = services;
-        _switchTo = switchTo;
-        _cycle = cycle;
-        _toggleMute = toggleMute;
-        _setManual = setManual;
-        _setAuto = setAuto;
-        _setLocked = setLocked;
+        _commands = commands;
         _showSettings = showSettings;
         _exitApp = exitApp;
-        _showBalloon = showBalloon;
     }
 
     /// <summary>根据当前设备与模式重建右键菜单（一级菜单 + 设备/模式子菜单）。</summary>
@@ -72,7 +54,7 @@ internal sealed class TrayMenuBuilder
                 IsChecked = dev.IsDefault,
             };
             string id = dev.Id;
-            item.Click += (_, _) => _switchTo(id);
+            item.Click += (_, _) => _commands.SwitchTo(id);
             devicesMenu.Items.Add(item);
         }
         if (devices.Count == 0)
@@ -80,13 +62,13 @@ internal sealed class TrayMenuBuilder
         menu.Items.Add(devicesMenu);
 
         var nextItem = new MenuItem { Header = "下一个麦克风" };
-        nextItem.Click += (_, _) => _cycle();
+        nextItem.Click += (_, _) => _commands.Cycle();
         menu.Items.Add(nextItem);
 
         // ---- 静音 ----
         bool muted = current?.IsMuted ?? false;
         var muteItem = new MenuItem { Header = muted ? "🔇 取消静音" : "🎤 静音当前麦" };
-        muteItem.Click += (_, _) => _toggleMute();
+        muteItem.Click += (_, _) => _commands.ToggleMute();
         menu.Items.Add(muteItem);
 
         menu.Items.Add(new Separator());
@@ -99,11 +81,11 @@ internal sealed class TrayMenuBuilder
         bool isAutoLevel = _services.Mode == WorkMode.Auto && _services.AutoStrategy == AutoStrategy.ByLevel;
         bool isAutoNewDevice = _services.Mode == WorkMode.Auto && _services.AutoStrategy == AutoStrategy.ByNewDevice;
 
-        AddRadialItem(modeMenu, "✋ 手动", isManual, () => _setManual());
-        AddRadialItem(modeMenu, "🎚 自动 · 按声音大小", isAutoLevel, () => _setAuto(AutoStrategy.ByLevel));
-        AddRadialItem(modeMenu, "🔌 自动 · 按新设备", isAutoNewDevice, () => _setAuto(AutoStrategy.ByNewDevice));
+        AddRadialItem(modeMenu, "✋ 手动", isManual, () => _commands.SetManual());
+        AddRadialItem(modeMenu, "🎚 自动 · 按声音大小", isAutoLevel, () => _commands.SetAuto(AutoStrategy.ByLevel));
+        AddRadialItem(modeMenu, "🔌 自动 · 按新设备", isAutoNewDevice, () => _commands.SetAuto(AutoStrategy.ByNewDevice));
         modeMenu.Items.Add(new Separator());
-        AddRadialItem(modeMenu, "🔒 锁定当前麦", isLocked, () => _setLocked());
+        AddRadialItem(modeMenu, "🔒 锁定当前麦", isLocked, () => _commands.SetLocked());
         menu.Items.Add(modeMenu);
 
         // ---- 开机自启 ----
@@ -113,12 +95,7 @@ internal sealed class TrayMenuBuilder
             IsCheckable = true,
             IsChecked = AutoStart.IsEnabled(),
         };
-        autoStartItem.Click += (_, _) =>
-        {
-            bool now = AutoStart.Toggle();
-            Refresh();
-            _showBalloon("开机自启", now ? "已启用" : "已关闭");
-        };
+        autoStartItem.Click += (_, _) => _commands.ToggleAutoStart();
         menu.Items.Add(autoStartItem);
 
         menu.Items.Add(new Separator());
