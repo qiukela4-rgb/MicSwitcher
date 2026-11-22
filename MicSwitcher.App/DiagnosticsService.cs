@@ -39,6 +39,12 @@ internal static class DiagnosticsService
         {
             int sessionId = Process.GetCurrentProcess().SessionId;
             Log($"SessionId={sessionId}");
+
+            // 量化「进程创建 → 走到环境探测」的耗时：这段是 CLR 加载 + WPF 程序集
+            // 初始化 + JIT，此前日志没有覆盖，是启动卡顿排查的盲区。
+            var clrStartup = DateTime.Now - Process.GetCurrentProcess().StartTime;
+            Log($"进程创建到环境探测={clrStartup.TotalMilliseconds:0} ms");
+
             Log("本进程完整性级别=" + GetIntegrityLevel(Process.GetCurrentProcess().Handle));
 
             IntPtr trayWnd = NativeMethods.FindWindow("Shell_TrayWnd", null);
