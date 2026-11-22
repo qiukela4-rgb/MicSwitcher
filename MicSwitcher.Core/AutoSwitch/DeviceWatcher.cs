@@ -46,9 +46,12 @@ public sealed class DeviceWatcher : IDisposable
     {
         if (_disposed) throw new ObjectDisposedException(nameof(DeviceWatcher));
 
+        // 枚举放在锁外：COM 调用可能因音频服务忙而阻塞，持锁会把 Stop 一起卡住
+        var baseline = _audio.EnumerateDevices(AudioFlow.Capture).Select(d => d.Id).ToHashSet();
+
         lock (_gate)
         {
-            _known = _audio.EnumerateDevices(AudioFlow.Capture).Select(d => d.Id).ToHashSet();
+            _known = baseline;
             _running = true;
         }
         _timer.Start();
@@ -72,21 +75,33 @@ public sealed class DeviceWatcher : IDisposable
 
     private void Poll()
     {
-        List<AudioDeviceInfo> arrived;
-
         lock (_gate)
         {
             if (!_running) return;
-
-            var devices = _audio.EnumerateDevices(AudioFlow.Capture);
-            var ids = devices.Select(d => d.Id).ToHashSet();
-
-            arrived = devices.Where(d => !_known.Contains(d.Id)).ToList();
-            _known = ids; // 拔掉的设备从基线移除，再插回来算新设备
         }
 
-        foreach (var dev in arrived)
-            DeviceArrived?.Invoke(this, new DeviceArrivedEventArgs { Device = dev });
+        // 枚举在锁外
+        var devices = _audio.EnumerateDevices(AudioFlow.Capture);
+        var ids = devices.Select(d => d.Id).ToList();
+
+        List<string> arrivedIds;
+        lock (_gate)
+        {
+            if (!_running) return;   // 枚举期间可能已 Stop
+
+            var result = ArrivalPolicy.Diff(_known, ids);
+            arrivedIds = result.Arrived.ToList();
+            _known = result.NextBaseline.ToHashSet();
+        }
+
+        if (arrivedIds.Count == 0) return;
+
+        var byId = devices.ToDictionary(d => d.Id);
+        foreach (var id in arrivedIds)
+        {
+            if (byId.TryGetValue(id, out var dev))
+                DeviceArrived?.Invoke(this, new DeviceArrivedEventArgs { Device = dev });
+        }
     }
 
     public void Dispose()
@@ -95,5 +110,6 @@ public sealed class DeviceWatcher : IDisposable
         _disposed = true;
         _timer.Stop();
         _timer.Dispose();
+        lock (_gate) { _running = false; }   // 释放之后 IsRunning 不该还是 true
     }
 }
