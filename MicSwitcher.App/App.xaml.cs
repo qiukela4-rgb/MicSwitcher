@@ -29,23 +29,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        // ---- 完整性级别检测：进程若是 Low 完整性，托盘图标会被 Windows UIPI 拦掉 ----
-        // 典型场景：程序放在被强制打了 Low 标签的目录（如某些沙箱工作区）里运行。
-        try
-        {
-            bool skip = Environment.GetEnvironmentVariable("MICSWITCHER_NO_INTEGRITY_WARN") == "1";
-            string level = GetIntegrityLevel(System.Diagnostics.Process.GetCurrentProcess().Handle);
-            if (!skip && (level.StartsWith("Low") || level.StartsWith("Untrusted")))
-            {
-                MessageBox.Show(
-                    $"检测到 MicSwitcher 运行在「低完整性级别」（{level}）。\n\n" +
-                    "此时 Windows 会阻止本程序向任务栏注册图标，托盘图标不会显示，\n" +
-                    "开机自启写注册表也会失败。\n\n" +
-                    "解决办法：把程序复制到一个普通目录（如桌面）后再运行。",
-                    "MicSwitcher - 完整性级别提示", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
-        }
-        catch { /* 检测失败不影响运行 */ }
+        DiagnosticsService.CheckIntegrityLevel();
 
         // ---- 单实例：已经有实例在跑 → 直接把它的窗口叫出来，然后自己退出 ----
         // 注意：不要用 "Global\" 前缀——创建/打开全局对象需要 SeCreateGlobalPrivilege，
@@ -57,7 +41,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            DiagLog("单实例：创建互斥量失败，按独立实例继续运行 " + ex.Message);
+            DiagnosticsService.Log("单实例：创建互斥量失败，按独立实例继续运行 " + ex.Message);
             createdNew = true;
         }
 
@@ -84,7 +68,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            DiagLog("单实例：创建唤醒事件失败，双击将依赖窗口激活兜底 " + ex.Message);
+            DiagnosticsService.Log("单实例：创建唤醒事件失败，双击将依赖窗口激活兜底 " + ex.Message);
             _showSettingsEvent = null;
         }
 
@@ -104,7 +88,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        DiagLog($"启动延迟：{delaySeconds} 秒后再初始化");
+        DiagnosticsService.Log($"启动延迟：{delaySeconds} 秒后再初始化");
         _startupTimer = new System.Windows.Threading.DispatcherTimer
         {
             Interval = TimeSpan.FromSeconds(delaySeconds),
@@ -130,7 +114,7 @@ public partial class App : System.Windows.Application
         _services.ApplyConfigToEngines();
         _services.AutoSwitched += OnAutoSwitched;
         _services.Error += (_, ex) => ShowBalloon("麦克风提示", ex.Message);
-        _services.LevelMonitor.Trace = DiagLog;
+        _services.LevelMonitor.Trace = DiagnosticsService.Log;
 
         BuildTrayIcon();
         RefreshTrayMenu();
@@ -147,14 +131,14 @@ public partial class App : System.Windows.Application
     // ---------- 托盘 ----------
     private void BuildTrayIcon()
     {
-        DiagLog("=== BuildTrayIcon 开始 ===");
+        DiagnosticsService.Log("=== BuildTrayIcon 开始 ===");
         try
         {
-            LogEnvironment();
+            DiagnosticsService.LogEnvironment();
 
             var icon = LoadTrayIcon(false);
             _trayIconKeepAlive = icon;   // 保持引用，避免图标句柄被回收导致托盘显示空白
-            DiagLog($"图标: {(icon is null ? "null" : icon.Width + "x" + icon.Height)}");
+            DiagnosticsService.Log($"图标: {(icon is null ? "null" : icon.Width + "x" + icon.Height)}");
 
             _tray = new TaskbarIcon
             {
@@ -164,12 +148,12 @@ public partial class App : System.Windows.Application
             };
             _tray.TrayMouseDoubleClick += (_, _) => ShowSettings();
 
-            DiagLog($"创建后: IsCreated={_tray.IsCreated} Visibility={_tray.Visibility}");
+            DiagnosticsService.Log($"创建后: IsCreated={_tray.IsCreated} Visibility={_tray.Visibility}");
 
             if (!_tray.IsCreated)
             {
-                try { _tray.ForceCreate(); DiagLog($"ForceCreate 后: IsCreated={_tray.IsCreated}"); }
-                catch (Exception ex) { DiagLog("ForceCreate 失败: " + ex.Message); }
+                try { _tray.ForceCreate(); DiagnosticsService.Log($"ForceCreate 后: IsCreated={_tray.IsCreated}"); }
+                catch (Exception ex) { DiagnosticsService.Log("ForceCreate 失败: " + ex.Message); }
             }
 
             Dispatcher.BeginInvoke(new Action(() =>
@@ -177,123 +161,15 @@ public partial class App : System.Windows.Application
                 try
                 {
                     _tray.Visibility = _config.ShowTrayIcon ? Visibility.Visible : Visibility.Hidden;
-                    DiagLog($"延迟刷新后: IsCreated={_tray.IsCreated} Visibility={_tray.Visibility}");
+                    DiagnosticsService.Log($"延迟刷新后: IsCreated={_tray.IsCreated} Visibility={_tray.Visibility}");
                 }
-                catch (Exception ex) { DiagLog("延迟刷新异常: " + ex.Message); }
+                catch (Exception ex) { DiagnosticsService.Log("延迟刷新异常: " + ex.Message); }
             }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         }
         catch (Exception ex)
         {
-            DiagLog("BuildTrayIcon 异常: " + ex);
+            DiagnosticsService.Log("BuildTrayIcon 异常: " + ex);
         }
-    }
-
-    /// <summary>记录会话/窗口站/桌面/任务栏窗口等关键信息，用于定位 TryCreate 失败。</summary>
-    private static void LogEnvironment()
-    {
-        try
-        {
-            int sessionId = System.Diagnostics.Process.GetCurrentProcess().SessionId;
-            DiagLog($"SessionId={sessionId}");
-            DiagLog("本进程完整性级别=" + GetIntegrityLevel(System.Diagnostics.Process.GetCurrentProcess().Handle));
-
-            IntPtr trayWnd = FindWindow("Shell_TrayWnd", null);
-            DiagLog("Shell_TrayWnd=" + (trayWnd != IntPtr.Zero ? "找到" : "未找到"));
-            if (trayWnd != IntPtr.Zero)
-            {
-                GetWindowThreadProcessId(trayWnd, out uint trayPid);
-                try
-                {
-                    using var tp = System.Diagnostics.Process.GetProcessById((int)trayPid);
-                    DiagLog($"任务栏进程={tp.ProcessName}({trayPid}) 完整性=" + GetIntegrityLevel(tp.Handle));
-                }
-                catch { }
-            }
-        }
-        catch (Exception ex) { DiagLog("环境探测异常: " + ex.Message); }
-    }
-
-    /// <summary>读取进程令牌的完整性级别（Low/Medium/High）。</summary>
-    private static string GetIntegrityLevel(IntPtr processHandle)
-    {
-        try
-        {
-            if (!OpenProcessToken(processHandle, 0x0008, out IntPtr tok)) return "未知";
-            try
-            {
-                GetTokenInformation(tok, 25, IntPtr.Zero, 0, out uint len);
-                IntPtr buf = System.Runtime.InteropServices.Marshal.AllocHGlobal((int)len);
-                try
-                {
-                    if (GetTokenInformation(tok, 25, buf, len, out _))
-                    {
-                        var label = System.Runtime.InteropServices.Marshal.PtrToStructure<TokenMandatoryLabel>(buf);
-                        IntPtr sub = GetSidSubAuthority(label.Label.Sid, 0);
-                        uint rid = (uint)System.Runtime.InteropServices.Marshal.ReadInt32(sub);
-                        return rid switch
-                        {
-                            0x0000 => "Untrusted",
-                            0x1000 => "Low（低，无法向任务栏注册图标）",
-                            0x2000 => "Medium（中，正常）",
-                            0x2100 => "MediumPlus",
-                            0x3000 => "High（高/管理员）",
-                            0x4000 => "System",
-                            _ => "0x" + rid.ToString("X")
-                        };
-                    }
-                }
-                finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(buf); }
-            }
-            finally { CloseHandle(tok); }
-        }
-        catch { }
-        return "未知";
-    }
-
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
-
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct TokenMandatoryLabel { public SidAndAttributes Label; }
-
-    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool OpenProcessToken(IntPtr proc, uint access, out IntPtr token);
-
-    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr info, uint len, out uint retLen);
-
-    [System.Runtime.InteropServices.DllImport("advapi32.dll")]
-    private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
-
-    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-    private static extern bool CloseHandle(IntPtr h);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
-
-    /// <summary>托盘诊断日志：写入 exe 同目录 tray-diag.log（每次启动覆盖），用于排查图标不显示。</summary>
-    private static bool _diagInitialized;
-
-    private static void DiagLog(string msg)
-    {
-        try
-        {
-            var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tray-diag.log");
-            var line = $"[{DateTime.Now:HH:mm:ss.fff}] {msg}{Environment.NewLine}";
-            if (!_diagInitialized)
-            {
-                _diagInitialized = true;
-                File.WriteAllText(path, line);
-            }
-            else
-            {
-                File.AppendAllText(path, line);
-            }
-        }
-        catch { /* 日志失败不影响运行 */ }
     }
 
     /// <summary>加载托盘图标：优先用随程序发布的 app.ico / app-muted.ico。</summary>
@@ -305,7 +181,7 @@ public partial class App : System.Windows.Application
             string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", file);
             if (File.Exists(path)) return new System.Drawing.Icon(path);
         }
-        catch (Exception ex) { DiagLog("加载托盘图标失败: " + ex.Message); }
+        catch (Exception ex) { DiagnosticsService.Log("加载托盘图标失败: " + ex.Message); }
         return CreateTrayIcon();
     }
 
@@ -324,7 +200,7 @@ public partial class App : System.Windows.Application
             _trayIconKeepAlive = icon;
             _tray.Icon = icon;
         }
-        catch (Exception ex) { DiagLog("切换托盘图标失败: " + ex.Message); }
+        catch (Exception ex) { DiagnosticsService.Log("切换托盘图标失败: " + ex.Message); }
     }
 
     private static bool _trayIconIsMuted;
@@ -339,14 +215,14 @@ public partial class App : System.Windows.Application
             string icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "app.ico");
             if (File.Exists(icoPath))
             {
-                DiagLog("图标来源: " + icoPath);
+                DiagnosticsService.Log("图标来源: " + icoPath);
                 return new System.Drawing.Icon(icoPath);
             }
-            DiagLog("图标文件不存在，回退自绘: " + icoPath);
+            DiagnosticsService.Log("图标文件不存在，回退自绘: " + icoPath);
         }
         catch (Exception ex)
         {
-            DiagLog("加载 app.ico 失败: " + ex.Message);
+            DiagnosticsService.Log("加载 app.ico 失败: " + ex.Message);
         }
 
         try
@@ -575,25 +451,13 @@ public partial class App : System.Windows.Application
     // ---------- 全局热键 ----------
     private HwndSource? _hotkeySource;
 
-    private const int WM_HOTKEY = 0x0312;
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
-    private const int HotkeyIdMute = 1;
-    private const int HotkeyIdNext = 2;
-    private const int HotkeyIdPrev = 3;
-
     /// <summary>按配置注册全局热键（静音 / 下一个 / 上一个）。</summary>
     private void RegisterHotkeys()
     {
         _hotkeySignature = $"{_config.EnableHotkeys}|{_config.HotkeyMute}|{_config.HotkeyNext}|{_config.HotkeyPrev}|{_config.HotkeyMuteEnabled}{_config.HotkeyNextEnabled}{_config.HotkeyPrevEnabled}";
         HotkeyStatus.Clear();
 
-        if (!_config.EnableHotkeys) { DiagLog("热键：配置里已关闭，跳过注册"); return; }
+        if (!_config.EnableHotkeys) { DiagnosticsService.Log("热键：配置里已关闭，跳过注册"); return; }
 
         try
         {
@@ -606,10 +470,10 @@ public partial class App : System.Windows.Application
             });
             _hotkeySource.AddHook(HotkeyWndProc);
 
-            bool m = TryRegister(HotkeyIdMute, "Mute", _config.HotkeyMute, "静音", _config.HotkeyMuteEnabled);
-            bool n = TryRegister(HotkeyIdNext, "Next", _config.HotkeyNext, "下一个", _config.HotkeyNextEnabled);
-            bool p = TryRegister(HotkeyIdPrev, "Prev", _config.HotkeyPrev, "上一个", _config.HotkeyPrevEnabled);
-            DiagLog($"热键注册: 静音={m} 下一个={n} 上一个={p}");
+            bool m = TryRegister(NativeMethods.HotkeyIdMute, "Mute", _config.HotkeyMute, "静音", _config.HotkeyMuteEnabled);
+            bool n = TryRegister(NativeMethods.HotkeyIdNext, "Next", _config.HotkeyNext, "下一个", _config.HotkeyNextEnabled);
+            bool p = TryRegister(NativeMethods.HotkeyIdPrev, "Prev", _config.HotkeyPrev, "上一个", _config.HotkeyPrevEnabled);
+            DiagnosticsService.Log($"热键注册: 静音={m} 下一个={n} 上一个={p}");
 
             // 有失败的热键 → 托盘提示一次（不影响程序其余功能）
             var failed = HotkeyStatus.Where(kv => !kv.Value).Select(kv => kv.Key switch
@@ -629,7 +493,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            DiagLog("热键注册异常: " + ex.Message);
+            DiagnosticsService.Log("热键注册异常: " + ex.Message);
         }
     }
 
@@ -641,7 +505,7 @@ public partial class App : System.Windows.Application
         if (!enabled)
         {
             HotkeyStatus[key] = true;   // 未启用视为“无冲突”
-            DiagLog($"热键「{label}」未启用，跳过注册");
+            DiagnosticsService.Log($"热键「{label}」未启用，跳过注册");
             return true;
         }
 
@@ -651,12 +515,12 @@ public partial class App : System.Windows.Application
         {
             if (!HotkeyGesture.TryParse(text, out var gesture, out string? error))
             {
-                DiagLog($"热键「{label}」无效（{text}）：{error}");
+                DiagnosticsService.Log($"热键「{label}」无效（{text}）：{error}");
             }
             else
             {
-                ok = RegisterHotKey(_hotkeySource.Handle, id, gesture.RegisterModifiers, gesture.VirtualKey);
-                if (!ok) DiagLog($"热键「{label}」({gesture}) 注册失败，可能被其他程序占用");
+                ok = NativeMethods.RegisterHotKey(_hotkeySource.Handle, id, gesture.RegisterModifiers, gesture.VirtualKey);
+                if (!ok) DiagnosticsService.Log($"热键「{label}」({gesture}) 注册失败，可能被其他程序占用");
             }
         }
 
@@ -676,9 +540,9 @@ public partial class App : System.Windows.Application
         try
         {
             if (_hotkeySource is null) return;
-            UnregisterHotKey(_hotkeySource.Handle, HotkeyIdMute);
-            UnregisterHotKey(_hotkeySource.Handle, HotkeyIdNext);
-            UnregisterHotKey(_hotkeySource.Handle, HotkeyIdPrev);
+            NativeMethods.UnregisterHotKey(_hotkeySource.Handle, NativeMethods.HotkeyIdMute);
+            NativeMethods.UnregisterHotKey(_hotkeySource.Handle, NativeMethods.HotkeyIdNext);
+            NativeMethods.UnregisterHotKey(_hotkeySource.Handle, NativeMethods.HotkeyIdPrev);
             _hotkeySource.Dispose();
             _hotkeySource = null;
         }
@@ -687,13 +551,13 @@ public partial class App : System.Windows.Application
 
     private IntPtr HotkeyWndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg != WM_HOTKEY) return IntPtr.Zero;
+        if (msg != NativeMethods.WM_HOTKEY) return IntPtr.Zero;
 
         switch (wParam.ToInt32())
         {
-            case HotkeyIdMute: SafeToggleMute(); handled = true; break;
-            case HotkeyIdNext: SafeCycle(true); handled = true; break;
-            case HotkeyIdPrev: SafeCycle(false); handled = true; break;
+            case NativeMethods.HotkeyIdMute: SafeToggleMute(); handled = true; break;
+            case NativeMethods.HotkeyIdNext: SafeCycle(true); handled = true; break;
+            case NativeMethods.HotkeyIdPrev: SafeCycle(false); handled = true; break;
         }
         return IntPtr.Zero;
     }
@@ -740,7 +604,7 @@ public partial class App : System.Windows.Application
             if (_tray is not null)
                 _tray.Visibility = _config.ShowTrayIcon ? Visibility.Visible : Visibility.Hidden;
         }
-        catch (Exception ex) { DiagLog("应用托盘可见性失败: " + ex.Message); }
+        catch (Exception ex) { DiagnosticsService.Log("应用托盘可见性失败: " + ex.Message); }
 
         // 热键配置变了才重新注册，避免每次拨开关都短暂注销
         string signature = $"{_config.EnableHotkeys}|{_config.HotkeyMute}|{_config.HotkeyNext}|{_config.HotkeyPrev}|{_config.HotkeyMuteEnabled}{_config.HotkeyNextEnabled}{_config.HotkeyPrevEnabled}";
@@ -765,27 +629,15 @@ public partial class App : System.Windows.Application
                 using (ev)
                 {
                     ev.Set();
-                    DiagLog("单实例：已通知已有实例显示窗口");
+                    DiagnosticsService.Log("单实例：已通知已有实例显示窗口");
                     return true;
                 }
             }
-            DiagLog("单实例：未找到唤醒事件（对端可能是旧版本）");
+            DiagnosticsService.Log("单实例：未找到唤醒事件（对端可能是旧版本）");
         }
-        catch (Exception ex) { DiagLog("单实例：发事件失败 " + ex.Message); }
-        return false;
+        catch (Exception ex) { DiagnosticsService.Log("单实例：发事件失败 " + ex.Message); }
+return false;
     }
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool IsIconic(IntPtr hWnd);
-
-    private const int SW_RESTORE = 9;
-    private const int SW_SHOW = 5;
 
     /// <summary>
     /// 兜底：直接找到已有实例的主窗口并置前（窗口可能是隐藏到托盘的，也能唤回来）。
@@ -796,21 +648,21 @@ public partial class App : System.Windows.Application
         // 新旧版本的窗口标题都试一遍
         foreach (var title in new[] { "MicSwitcher", "MicSwitcher 设置" })
         {
-            IntPtr h = FindWindow(null, title);
+            IntPtr h = NativeMethods.FindWindow(null, title);
             if (h == IntPtr.Zero) continue;
 
             try
             {
-                if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
-                else ShowWindow(h, SW_SHOW);
-                SetForegroundWindow(h);
-                DiagLog($"单实例：已直接唤起窗口「{title}」");
+                if (NativeMethods.IsIconic(h)) NativeMethods.ShowWindow(h, NativeMethods.SW_RESTORE);
+                else NativeMethods.ShowWindow(h, NativeMethods.SW_SHOW);
+                NativeMethods.SetForegroundWindow(h);
+                DiagnosticsService.Log($"单实例：已直接唤起窗口「{title}」");
                 return true;
             }
-            catch (Exception ex) { DiagLog("单实例：唤起窗口失败 " + ex.Message); }
+            catch (Exception ex) { DiagnosticsService.Log("单实例：唤起窗口失败 " + ex.Message); }
         }
 
-        DiagLog("单实例：没找到已有窗口");
+        DiagnosticsService.Log("单实例：没找到已有窗口");
         return false;
     }
 
@@ -826,7 +678,7 @@ public partial class App : System.Windows.Application
                 try
                 {
                     ev.WaitOne();
-                    DiagLog("单实例：收到唤醒信号，弹出主窗口");
+                    DiagnosticsService.Log("单实例：收到唤醒信号，弹出主窗口");
                     Dispatcher.BeginInvoke(new Action(ShowSettings));
                 }
                 catch { return; }
@@ -839,7 +691,7 @@ public partial class App : System.Windows.Application
     // ---------- 退出 ----------
     private void ExitApp()
     {
-        DiagLog("退出：开始");
+        DiagnosticsService.Log("退出：开始");
 
         // 先收起菜单：退出过程中 UI 线程若被占住，残留的菜单窗口会一直挂在屏幕上，
         // 看起来就像程序没反应
@@ -851,7 +703,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            DiagLog("退出：界面清理失败 " + ex.Message);
+            DiagnosticsService.Log("退出：界面清理失败 " + ex.Message);
         }
 
         // 释放服务可能阻塞（要等音频采集流停下来）。放到后台线程并限时等待：
@@ -863,18 +715,18 @@ public partial class App : System.Windows.Application
                 var dispose = System.Threading.Tasks.Task.Run(() =>
                 {
                     try { _services.Dispose(); }
-                    catch (Exception ex) { DiagLog("退出：释放服务失败 " + ex.Message); }
+                    catch (Exception ex) { DiagnosticsService.Log("退出：释放服务失败 " + ex.Message); }
                 });
 
                 if (dispose.Wait(TimeSpan.FromSeconds(3)))
-                    DiagLog("退出：服务已释放");
+                    DiagnosticsService.Log("退出：服务已释放");
                 else
-                    DiagLog("退出：服务释放超时（采集流未在 3 秒内停止），继续退出");
+                    DiagnosticsService.Log("退出：服务释放超时（采集流未在 3 秒内停止），继续退出");
             }
         }
         catch (Exception ex)
         {
-            DiagLog("退出：释放服务异常 " + ex.Message);
+            DiagnosticsService.Log("退出：释放服务异常 " + ex.Message);
         }
 
         try
@@ -884,10 +736,10 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            DiagLog("退出：销毁托盘失败 " + ex.Message);
+            DiagnosticsService.Log("退出：销毁托盘失败 " + ex.Message);
         }
 
-        DiagLog("退出：调用 Shutdown");
+        DiagnosticsService.Log("退出：调用 Shutdown");
         Shutdown();
     }
 
@@ -899,7 +751,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        DiagLog("退出：OnExit");
+        DiagnosticsService.Log("退出：OnExit");
         // 不主动 ReleaseMutex：进程退出时内核会自动释放命名互斥量，
         // 且 ReleaseMutex 只能在持有它的线程调用（OnExit 可能在其他线程，会抛异常）。
         UnregisterHotkeys();
