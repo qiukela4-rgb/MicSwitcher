@@ -1,11 +1,7 @@
-using System.IO;
 using System.Windows;
-using System.Windows.Controls;
-using H.NotifyIcon;
 using MicSwitcher.Core.Audio;
 using MicSwitcher.Core.AutoSwitch;
 using MicSwitcher.Core.Config;
-using MicSwitcher.Core.Startup;
 using MessageBox = System.Windows.MessageBox;
 
 namespace MicSwitcher.App;
@@ -20,9 +16,9 @@ public partial class App : System.Windows.Application
     private AppServices _services = null!;
     private bool _initialized;
     private AppConfig _config = new();
-    private TaskbarIcon _tray = null!;
+    private TrayIconHost? _trayHost;
+    private TrayMenuBuilder? _trayMenu;
     private SettingsWindow? _settingsWindow;
-    private static System.Drawing.Icon? _trayIconKeepAlive;
     private static HotkeyService? _hotkeyService;
     private static readonly IReadOnlyDictionary<string, bool> EmptyStatus = new Dictionary<string, bool>();
 
@@ -95,13 +91,30 @@ public partial class App : System.Windows.Application
         _initialized = true;
         _services.ApplyStrategy(_config.AutoStrategy);
         _services.ApplyConfigToEngines();
+
+        var trayHost = new TrayIconHost(() => _config, ShowSettings);
+        _trayHost = trayHost;
+        var trayMenu = new TrayMenuBuilder(
+            trayHost,
+            _services,
+            SafeSwitchTo,
+            () => SafeCycle(),
+            SafeToggleMute,
+            SetManualMode,
+            SetAutoMode,
+            SetLockedMode,
+            ShowSettings,
+            ExitApp,
+            trayHost.ShowNotification);
+        _trayMenu = trayMenu;
+
         _services.AutoSwitched += OnAutoSwitched;
-        _services.Error += (_, ex) => ShowBalloon("麦克风提示", ex.Message);
+        _services.Error += (_, ex) => trayHost.ShowNotification("麦克风提示", ex.Message);
         _services.LevelMonitor.Trace = DiagnosticsService.Log;
 
-        BuildTrayIcon();
-        RefreshTrayMenu();
-        _hotkeyService = new HotkeyService(() => _config, SafeToggleMute, forward => SafeCycle(forward), ShowBalloon);
+        trayHost.Create();
+        trayMenu.Refresh();
+        _hotkeyService = new HotkeyService(() => _config, SafeToggleMute, forward => SafeCycle(forward), trayHost.ShowNotification);
         _hotkeyService.Register();
 
         // 最小化启动：命令行 --minimized（开机自启）或配置里的「启动时最小化到托盘」都算
@@ -112,244 +125,22 @@ public partial class App : System.Windows.Application
             ShowSettings();
     }
 
-    // ---------- 托盘 ----------
-    private void BuildTrayIcon()
-    {
-        DiagnosticsService.Log("=== BuildTrayIcon 开始 ===");
-        try
-        {
-            DiagnosticsService.LogEnvironment();
-
-            var icon = LoadTrayIcon(false);
-            _trayIconKeepAlive = icon;   // 保持引用，避免图标句柄被回收导致托盘显示空白
-            DiagnosticsService.Log($"图标: {(icon is null ? "null" : icon.Width + "x" + icon.Height)}");
-
-            _tray = new TaskbarIcon
-            {
-                Icon = icon,
-                ToolTipText = "MicSwitcher - 麦克风切换",
-                Visibility = _config.ShowTrayIcon ? Visibility.Visible : Visibility.Hidden,
-            };
-            _tray.TrayMouseDoubleClick += (_, _) => ShowSettings();
-
-            DiagnosticsService.Log($"创建后: IsCreated={_tray.IsCreated} Visibility={_tray.Visibility}");
-
-            if (!_tray.IsCreated)
-            {
-                try { _tray.ForceCreate(); DiagnosticsService.Log($"ForceCreate 后: IsCreated={_tray.IsCreated}"); }
-                catch (Exception ex) { DiagnosticsService.Log("ForceCreate 失败: " + ex.Message); }
-            }
-
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                try
-                {
-                    _tray.Visibility = _config.ShowTrayIcon ? Visibility.Visible : Visibility.Hidden;
-                    DiagnosticsService.Log($"延迟刷新后: IsCreated={_tray.IsCreated} Visibility={_tray.Visibility}");
-                }
-                catch (Exception ex) { DiagnosticsService.Log("延迟刷新异常: " + ex.Message); }
-            }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-        }
-        catch (Exception ex)
-        {
-            DiagnosticsService.Log("BuildTrayIcon 异常: " + ex);
-        }
-    }
-
-    /// <summary>加载托盘图标：优先用随程序发布的 app.ico / app-muted.ico。</summary>
-    private static System.Drawing.Icon LoadTrayIcon(bool muted)
-    {
-        try
-        {
-            string file = muted ? "app-muted.ico" : "app.ico";
-            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", file);
-            if (File.Exists(path)) return new System.Drawing.Icon(path);
-        }
-        catch (Exception ex) { DiagnosticsService.Log("加载托盘图标失败: " + ex.Message); }
-        return CreateTrayIcon();
-    }
-
-    /// <summary>按当前静音状态切换托盘图标（可在设置里关掉这个行为）。</summary>
-    private void UpdateTrayIcon(bool isMuted)
-    {
-        if (_tray is null) return;
-
-        bool wantMuted = _config.TrayIconShowsMute && isMuted;
-        if (wantMuted == _trayIconIsMuted && _trayIconKeepAlive is not null) return;
-
-        try
-        {
-            _trayIconIsMuted = wantMuted;
-            var icon = LoadTrayIcon(wantMuted);
-            _trayIconKeepAlive = icon;
-            _tray.Icon = icon;
-        }
-        catch (Exception ex) { DiagnosticsService.Log("切换托盘图标失败: " + ex.Message); }
-    }
-
-    private static bool _trayIconIsMuted;
-
-    /// <summary>GDI+ 自绘托盘图标（绿色圆底+白色麦克风）；任何绘制失败都回退系统图标，绝不抛异常。</summary>
-    private static System.Drawing.Icon CreateTrayIcon()
-    {
-        // 优先加载随程序发布的真实 .ico 文件（多尺寸，兼容性最好）。
-        // 运行时现画的 HICON 在托盘里可能显示为空白，故只作为兜底。
-        try
-        {
-            string icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "app.ico");
-            if (File.Exists(icoPath))
-            {
-                DiagnosticsService.Log("图标来源: " + icoPath);
-                return new System.Drawing.Icon(icoPath);
-            }
-            DiagnosticsService.Log("图标文件不存在，回退自绘: " + icoPath);
-        }
-        catch (Exception ex)
-        {
-            DiagnosticsService.Log("加载 app.ico 失败: " + ex.Message);
-        }
-
-        try
-        {
-            using var bmp = new System.Drawing.Bitmap(32, 32);
-            using (var g = System.Drawing.Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                g.Clear(System.Drawing.Color.Transparent);
-
-                using (var bg = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(255, 46, 160, 67)))
-                {
-                    g.FillEllipse(bg, 1, 1, 30, 30);
-                }
-                using (var mic = new System.Drawing.SolidBrush(System.Drawing.Color.White))
-                {
-                    g.FillEllipse(mic, 12, 8, 8, 8);
-                    g.FillRectangle(mic, 14, 8, 4, 9);
-                    g.FillRectangle(mic, 9, 20, 14, 3);
-                }
-            }
-
-            return System.Drawing.Icon.FromHandle(bmp.GetHicon());
-        }
-        catch
-        {
-            return System.Drawing.SystemIcons.Application;
-        }
-    }
-
-    /// <summary>根据当前设备与模式重建右键菜单（一级菜单 + 设备/模式子菜单）。</summary>
-    private void RefreshTrayMenu()
-    {
-        var menu = new ContextMenu();
-
-        // ---- 当前麦克风（只读标题） ----
-        var current = _services.Audio.GetDefaultDevice(AudioFlow.Capture);
-        menu.Items.Add(new MenuItem
-        {
-            Header = current is null ? "没有检测到麦克风" : $"🎤 {current.FriendlyName}",
-            IsEnabled = false,
-        });
-        menu.Items.Add(new Separator());
-
-        // ---- 切换麦克风（子菜单） ----
-        var devicesMenu = new MenuItem { Header = "切换麦克风" };
-        var devices = _services.OrderedDevices(includeExcluded: false);
-        foreach (var dev in devices)
-        {
-            var item = new MenuItem
-            {
-                Header = dev.IsMuted ? "🔇 " + dev.FriendlyName : dev.FriendlyName,
-                IsCheckable = true,
-                IsChecked = dev.IsDefault,
-            };
-            string id = dev.Id;
-            item.Click += (_, _) => SafeSwitchTo(id);
-            devicesMenu.Items.Add(item);
-        }
-        if (devices.Count == 0)
-            devicesMenu.Items.Add(new MenuItem { Header = "（无可用麦克风）", IsEnabled = false });
-        menu.Items.Add(devicesMenu);
-
-        var nextItem = new MenuItem { Header = "下一个麦克风" };
-        nextItem.Click += (_, _) => SafeCycle();
-        menu.Items.Add(nextItem);
-
-        // ---- 静音 ----
-        bool muted = current?.IsMuted ?? false;
-        var muteItem = new MenuItem { Header = muted ? "🔇 取消静音" : "🎤 静音当前麦" };
-        muteItem.Click += (_, _) => SafeToggleMute();
-        menu.Items.Add(muteItem);
-
-        menu.Items.Add(new Separator());
-
-        // ---- 模式（子菜单） ----
-        var modeMenu = new MenuItem { Header = "模式" };
-
-        bool isManual = _services.Mode == WorkMode.Manual;
-        bool isLocked = _services.Mode == WorkMode.Locked;
-        bool isAutoLevel = _services.Mode == WorkMode.Auto && _services.AutoStrategy == AutoStrategy.ByLevel;
-        bool isAutoNewDevice = _services.Mode == WorkMode.Auto && _services.AutoStrategy == AutoStrategy.ByNewDevice;
-
-        AddRadialItem(modeMenu, "✋ 手动", isManual, () => SetManualMode());
-        AddRadialItem(modeMenu, "🎚 自动 · 按声音大小", isAutoLevel, () => SetAutoMode(AutoStrategy.ByLevel));
-        AddRadialItem(modeMenu, "🔌 自动 · 按新设备", isAutoNewDevice, () => SetAutoMode(AutoStrategy.ByNewDevice));
-        modeMenu.Items.Add(new Separator());
-        AddRadialItem(modeMenu, "🔒 锁定当前麦", isLocked, () => SetLockedMode());
-        menu.Items.Add(modeMenu);
-
-        // ---- 开机自启 ----
-        var autoStartItem = new MenuItem
-        {
-            Header = "🚀 开机自启",
-            IsCheckable = true,
-            IsChecked = AutoStart.IsEnabled(),
-        };
-        autoStartItem.Click += (_, _) =>
-        {
-            bool now = AutoStart.Toggle();
-            RefreshTrayMenu();
-            ShowBalloon("开机自启", now ? "已启用" : "已关闭");
-        };
-        menu.Items.Add(autoStartItem);
-
-        menu.Items.Add(new Separator());
-
-        var settingsItem = new MenuItem { Header = "⚙ 设置…" };
-        settingsItem.Click += (_, _) => ShowSettings();
-        menu.Items.Add(settingsItem);
-
-        var exitItem = new MenuItem { Header = "❌ 退出" };
-        exitItem.Click += (_, _) => ExitApp();
-        menu.Items.Add(exitItem);
-
-        _tray.ContextMenu = menu;
-        UpdateTrayIcon(current?.IsMuted ?? false);
-    }
-
-    /// <summary>往子菜单里加一个互斥（单选式）菜单项。</summary>
-    private static void AddRadialItem(MenuItem parent, string text, bool isChecked, Action onClick)
-    {
-        var item = new MenuItem { Header = text, IsCheckable = true, IsChecked = isChecked };
-        item.Click += (_, _) => onClick();
-        parent.Items.Add(item);
-    }
-
     // ---------- 模式切换 ----------
 
     private void SetManualMode()
     {
         _services.Config = _config;
         _services.SetManual();
-        RefreshTrayMenu();
-        ShowBalloon("模式：手动", "不再自动切换，仅响应手动命令。");
+        _trayMenu?.Refresh();
+        _trayHost?.ShowNotification("模式：手动", "不再自动切换，仅响应手动命令。");
     }
 
     private void SetAutoMode(AutoStrategy strategy)
     {
         _services.Config = _config;
         _services.SetAuto(strategy);
-        RefreshTrayMenu();
-        ShowBalloon("模式：自动",
+        _trayMenu?.Refresh();
+        _trayHost?.ShowNotification("模式：自动",
             strategy == AutoStrategy.ByLevel
                 ? "正在监听各麦克风声音，自动切到正在说话的那个。"
                 : "正在监听新麦克风接入，插上就切过去。");
@@ -359,9 +150,9 @@ public partial class App : System.Windows.Application
     {
         _services.Config = _config;
         _services.LockCurrent();
-        RefreshTrayMenu();
+        _trayMenu?.Refresh();
         var locked = _services.Audio.GetDefaultDevice(AudioFlow.Capture);
-        ShowBalloon("模式：锁定", $"已锁定 {(locked?.FriendlyName ?? "当前麦")}，外部改动会被还原。");
+        _trayHost?.ShowNotification("模式：锁定", $"已锁定 {(locked?.FriendlyName ?? "当前麦")}，外部改动会被还原。");
     }
 
     // ---------- 安全命令封装 ----------
@@ -372,9 +163,9 @@ public partial class App : System.Windows.Application
             _services.Config = _config;
             if (_services.Mode != WorkMode.Manual) _services.SetManual();
             _services.SwitchTo(deviceId);
-            RefreshTrayMenu();
+            _trayMenu?.Refresh();
         }
-        catch (Exception ex) { ShowBalloon("切换失败", ex.Message); }
+        catch (Exception ex) { _trayHost?.ShowNotification("切换失败", ex.Message); }
     }
 
     private void SafeCycle(bool forward = true)
@@ -385,7 +176,7 @@ public partial class App : System.Windows.Application
             var devices = _services.Audio.EnumerateDevices(AudioFlow.Capture);
             if (devices.Count < 2)
             {
-                ShowBalloon("下一个麦克风", "至少需要两个麦克风才能轮流切换。");
+                _trayHost?.ShowNotification("下一个麦克风", "至少需要两个麦克风才能轮流切换。");
                 return;
             }
             string? currentId = _services.Audio.GetDefaultDeviceId(AudioFlow.Capture);
@@ -396,10 +187,10 @@ public partial class App : System.Windows.Application
             _services.Config = _config;
             if (_services.Mode != WorkMode.Manual) _services.SetManual();
             _services.SwitchTo(next.Id);
-            RefreshTrayMenu();
-            ShowBalloon("已切换麦克风", next.FriendlyName);
+            _trayMenu?.Refresh();
+            _trayHost?.ShowNotification("已切换麦克风", next.FriendlyName);
         }
-        catch (Exception ex) { ShowBalloon("切换失败", ex.Message); }
+        catch (Exception ex) { _trayHost?.ShowNotification("切换失败", ex.Message); }
     }
 
     private void SafeToggleMute()
@@ -409,10 +200,10 @@ public partial class App : System.Windows.Application
             var current = _services.Audio.GetDefaultDeviceId(AudioFlow.Capture);
             if (current is null) return;
             bool nowMuted = _services.Audio.ToggleMute(current);
-            RefreshTrayMenu();
-            ShowBalloon(nowMuted ? "已静音" : "已取消静音", "");
+            _trayMenu?.Refresh();
+            _trayHost?.ShowNotification(nowMuted ? "已静音" : "已取消静音", "");
         }
-        catch (Exception ex) { ShowBalloon("静音失败", ex.Message); }
+        catch (Exception ex) { _trayHost?.ShowNotification("静音失败", ex.Message); }
     }
 
     // ---------- 自动切换提示 ----------
@@ -420,15 +211,15 @@ public partial class App : System.Windows.Application
     {
         Dispatcher.BeginInvoke(() =>
         {
-            RefreshTrayMenu();
+            _trayMenu?.Refresh();
             if (!_config.NotifyOnAutoSwitch) return;
 
             if (e.From.Id == e.To.Id)
-                ShowBalloon("麦克风已恢复", $"原默认麦不可用，已切到 {e.To.FriendlyName}");
+                _trayHost?.ShowNotification("麦克风已恢复", $"原默认麦不可用，已切到 {e.To.FriendlyName}");
             else if (e.WinningLevel <= 0f)
-                ShowBalloon("已切到真实麦克风", $"{e.From.FriendlyName} → {e.To.FriendlyName}");
+                _trayHost?.ShowNotification("已切到真实麦克风", $"{e.From.FriendlyName} → {e.To.FriendlyName}");
             else
-                ShowBalloon("自动切换麦克风", $"{e.From.FriendlyName} → {e.To.FriendlyName}");
+                _trayHost?.ShowNotification("自动切换麦克风", $"{e.From.FriendlyName} → {e.To.FriendlyName}");
         });
     }
 
@@ -471,15 +262,14 @@ public partial class App : System.Windows.Application
 
         try
         {
-            if (_tray is not null)
-                _tray.Visibility = _config.ShowTrayIcon ? Visibility.Visible : Visibility.Hidden;
+            _trayHost?.SetVisible(_config.ShowTrayIcon);
         }
         catch (Exception ex) { DiagnosticsService.Log("应用托盘可见性失败: " + ex.Message); }
 
         // 热键配置变了才重新注册，避免每次拨开关都短暂注销
         _hotkeyService?.ReloadIfChanged(_config);
 
-        RefreshTrayMenu();
+        _trayMenu?.Refresh();
     }
 
 // ---------- 退出 ----------
@@ -491,7 +281,7 @@ public partial class App : System.Windows.Application
         // 看起来就像程序没反应
         try
         {
-            if (_tray?.ContextMenu is { } menu) menu.IsOpen = false;
+            _trayHost?.CloseMenu();
             _settingsWindow?.AllowClose(); // 放行设置窗口的关闭拦截
             _hotkeyService?.Unregister();
         }
@@ -525,8 +315,8 @@ public partial class App : System.Windows.Application
 
         try
         {
-            _tray?.Dispose();
-            _tray = null!;
+            _trayHost?.Dispose();
+            _trayHost = null;
         }
         catch (Exception ex)
         {
@@ -535,12 +325,6 @@ public partial class App : System.Windows.Application
 
         DiagnosticsService.Log("退出：调用 Shutdown");
         Shutdown();
-    }
-
-    private void ShowBalloon(string title, string text)
-    {
-        if (_tray is null) return;
-        _tray.ShowNotification(title, text);
     }
 
     protected override void OnExit(ExitEventArgs e)
