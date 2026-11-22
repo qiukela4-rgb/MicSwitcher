@@ -85,10 +85,15 @@ public partial class App : System.Windows.Application
     /// <summary>真正把托盘、服务、热键拉起来的初始化（可能被延迟调用）。</summary>
     private void InitializeApp(StartupEventArgs e)
     {
+        var initWatch = System.Diagnostics.Stopwatch.StartNew();
+        double sinceStart = (DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).TotalMilliseconds;
+        DiagnosticsService.Log($"初始化：开始（距进程创建 {sinceStart:0} ms）");
+
         _services = new AppServices { Config = _config };
         _initialized = true;
         _services.ApplyStrategy(_config.AutoStrategy);
         _services.ApplyConfigToEngines();
+        DiagnosticsService.Log($"初始化：服务就绪 {initWatch.ElapsedMilliseconds} ms");
 
         var trayHost = new TrayIconHost(() => _config, ShowSettings);
         _trayHost = trayHost;
@@ -105,6 +110,7 @@ public partial class App : System.Windows.Application
         trayMenu.Refresh();
         _hotkeyService = new HotkeyService(() => _config, trayCommands.ToggleMute, forward => trayCommands.Cycle(forward), trayHost.ShowNotification);
         _hotkeyService.Register();
+        DiagnosticsService.Log($"初始化：托盘与热键就绪 {initWatch.ElapsedMilliseconds} ms");
 
         // 最小化启动：命令行 --minimized（开机自启）或配置里的「启动时最小化到托盘」都算
         bool minimized = e.Args.Contains("--minimized", StringComparer.OrdinalIgnoreCase)
