@@ -90,7 +90,7 @@ public sealed class AppConfig
     /// <summary>采样间隔（毫秒）。</summary>
     public int SampleIntervalMs { get; set; } = 300;
 
-    /// <summary>静音阈值：窗口平均电平低于它就算没人说话（0.001 ~ 0.2）。</summary>
+    /// <summary>静音阈值：窗口平均电平低于它就算没人说话（0.001 ~ 0.5，引擎侧夹到 0.0005 ~ 0.5）。</summary>
     public float SilenceThreshold { get; set; } = 0.004f;
 
     /// <summary>防抖次数：连续多少个采样周期达标才切换。</summary>

@@ -187,7 +187,9 @@ MicSwitcher/
 │   ├── Audio/
 │   │   ├── Native/PolicyConfig.cs   # 非公开 COM 接口 IPolicyConfig 封装（设默认设备）
 │   │   ├── AudioDeviceInfo.cs        # 设备快照模型
-│   │   └── AudioDeviceService.cs     # 枚举/静音/切默认/读电平（基于 NAudio）
+│   │   ├── AudioDeviceService.cs     # 枚举/静音/切默认/读系统峰值表（基于 NAudio）
+│   │   ├── DevicePeakReader.cs       # 每设备开共享模式 WasapiCapture 实测峰值
+│   │   └── VirtualDeviceDetector.cs  # 按设备名识别虚拟声卡
 │   ├── AutoSwitch/LevelMonitor.cs    # 自动策略①：按电平选最佳麦
 │   ├── AutoSwitch/DeviceWatcher.cs   # 自动策略②：监听新麦克风接入
 │   ├── Locking/DefaultGuard.cs       # 锁定守护（IMMNotificationClient + 轮询兜底）
@@ -206,7 +208,8 @@ MicSwitcher/
 | 设为默认设备 | 非公开 COM 接口 `IPolicyConfig.SetDefaultEndpoint()`（GUID `F8679F50-850A-41CF-9C72-430F290290C8`） |
 | 静音 | `IAudioEndpointVolume.SetMute()`（经 NAudio 封装） |
 | 枚举设备 | `IMMDeviceEnumerator.EnumAudioEndpoints()`（经 NAudio） |
-| 读输入电平 | `IAudioMeterInformation.GetPeakValue()`（经 NAudio `MasterPeakValue`） |
+| 读输入电平 | `DevicePeakReader`：每个设备一条共享模式 `WasapiCapture`，直接从音频缓冲算峰值（支持 float32 / 8·16·24·32-bit PCM，`WAVE_FORMAT_EXTENSIBLE` 先归一化） |
+| 读系统峰值表 | `IAudioMeterInformation.GetPeakValue()`（经 NAudio `MasterPeakValue`），仅作实测失败时的回退 |
 | 监听默认设备变动 | `IMMNotificationClient.OnDefaultDeviceChanged`（经 NAudio） |
 
 > `IPolicyConfig` 是 Windows 非公开接口，SoundSwitch、AudioDeviceSwitcher 等工具都用同一机制；
@@ -214,10 +217,10 @@ MicSwitcher/
 
 ## 电平自动切换的工作原理
 
-`LevelMonitor` 每 ~300ms 采样一次所有麦克风的 `MasterPeakValue`（0~1），
+`LevelMonitor` 每 ~300ms 采样一次所有麦克风的峰值（由 `DevicePeakReader` 实测，见下），
 维护一个滑动窗口（默认 6 个样本 ≈ 1.8 秒）算平均电平：
 
-1. 最强设备的窗口平均电平 **低于静音阈值**（默认 0.01）→ 视为没人说话，不动。
+1. 最强设备的窗口平均电平 **低于静音阈值**（默认 0.4%）→ 视为没人说话，不动。
 2. 最强设备持续达标 **3 个采样周期**（防抖）→ 才自动 `SetDefaultEndpoint` 切过去。
 3. 切完触发 `Switched` 事件，托盘弹气泡 + 刷新菜单。
 
@@ -230,7 +233,7 @@ MicSwitcher/
 
 **相对电平判据**：除了绝对静音阈值，还会比较「最响设备」和「当前设备」的电平——
 只要最响的那台明显更响（≥1.5 倍且超过阈值一半），即使它没到绝对阈值也会切过去，
-避免虚拟声卡这类电平偏小的设备被漏掉。默认阈值也调低到 0.4%，设置里可调（0.5%–50%）。
+避免虚拟声卡这类电平偏小的设备被漏掉。默认阈值也调低到 0.4%，设置里可调（0.1%–50%）。
 
 **虚拟声卡优先让位**：虚拟声卡（Mic You / VB-Cable / Voicemeeter 等，按设备名关键字识别）
 在「都没声音」时不会一直占着默认麦克风——程序会自动切到一个真实设备待命；

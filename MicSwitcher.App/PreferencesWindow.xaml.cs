@@ -66,7 +66,9 @@ public partial class PreferencesWindow : Window
 
         NotifyToggle.IsChecked = _config.NotifyOnAutoSwitch;
 
-        ThresholdSlider.Value = Math.Clamp((double)_config.SilenceThreshold * 100, 0.5, 50);
+        // 下限必须覆盖配置默认值 0.4%，否则滑杆会把默认值显示成 0.5%，
+        // 用户一动滑杆就把真实阈值改大，虚拟声卡这类小电平设备会被漏掉。
+        ThresholdSlider.Value = Math.Clamp((double)_config.SilenceThreshold * 100, 0.1, 50);
         ThresholdText.Text = $"{ThresholdSlider.Value:0.0}%";
         DebounceSlider.Value = Math.Clamp(_config.DebounceSamples, 1, 10);
         DebounceText.Text = $"{(int)DebounceSlider.Value} 次";

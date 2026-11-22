@@ -10,4 +10,9 @@
     <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 峰值解码是纯函数，放 internal 让测试直接覆盖，不扩大公开 API -->
+    <InternalsVisibleTo Include="MicSwitcher.Tests" />
+  </ItemGroup>
+
 </Project>

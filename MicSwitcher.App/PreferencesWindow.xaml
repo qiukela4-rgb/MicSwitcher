@@ -172,7 +172,7 @@
                     <StackPanel>
                         <TextBlock Text="静音阈值：低于它的声音算「没人说话」" Style="{StaticResource Hint}" Margin="0,0,0,4"/>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                            <Slider x:Name="ThresholdSlider" Width="240" Minimum="0.5" Maximum="50"
+                            <Slider x:Name="ThresholdSlider" Width="240" Minimum="0.1" Maximum="50"
                                     TickFrequency="0.5" IsSnapToTickEnabled="True" VerticalAlignment="Center"
                                     ValueChanged="Threshold_Changed"/>
                             <TextBlock x:Name="ThresholdText" Text="1.0%" FontSize="12" Margin="8,0,0,0"
