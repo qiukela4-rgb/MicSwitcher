@@ -122,6 +122,29 @@ Windows 麦克风切换工具（个人自用 + 学习），C# + WPF 实现。
 - 本机 `C:\Users\qiuke\` 下的 `.dotnet`、`AppData\Roaming\NuGet` 目录**无法写入**，
   所以构建时必须把 `DOTNET_CLI_HOME`、`NUGET_PACKAGES`、`APPDATA` 等重定向到 `D:\TOOLS\dotnet-home`。
 - 这些环境变量已经封装进 `build.cmd` / `run.cmd` / `test.cmd`，**直接跑脚本即可，不要裸敲 `dotnet build`**。
+- **临时目录用 `D:\TOOLS\dotnet-home\tmp-run`，不是 `…\tmp`**。
+  旧 `tmp` 目录积累 330 个历史条目后出现间歇性写入失败：MSBuild 写 `.rsp` 报
+  `Access to the path ... is denied`，vstest 的 testhost 则报 `Win32Exception(5) 拒绝访问`。
+  后者极易被误判成「权限不足 / 受限令牌」，实际根因是临时目录写不进去。
+- 三个脚本都设了 `MSBUILDDISABLENODEREUSE=1` 与 `DOTNET_CLI_USE_MSBUILD_SERVER=0`：
+  否则构建结束后 MSBuild 进程会驻留并占住临时文件，与另一个同时构建的进程
+  （例如 VS Code 里的码道）互相干扰。
+
+## 测试
+
+`test.cmd` 跑全套 xunit 用例，当前 **72 个全部通过**，约 0.5 秒。
+
+| 测试类 | 用例 | 覆盖什么 |
+|---|---|---|
+| `HotkeyGestureTests` | 11 | 热键文本解析与格式化往返、非法输入拒绝 |
+| `DevicePeakReaderTests` | 15 | float32 与 8/16/24/32-bit PCM 峰值解码、扩展格式归一化、不支持位深 |
+| `SwitchPolicyTests` | 15 | 自动切换判定：静音、防抖、相对判据、平局、候选换人 |
+| `RecoveryPolicyTests` | 12 | 默认设备失效时的恢复目标：优先级、电平、全虚拟退化 |
+| `VirtualDeviceDetectorTests` | 16 | 虚拟声卡关键字识别（正例与真实麦克风反例） |
+| `AudioDeviceServiceTests` | 3 | 设备枚举不抛异常（无音频设备时得到空列表，不断言数量） |
+
+判定与恢复两块是纯函数，不依赖音频设备；`AudioDeviceServiceTests` 需要真实 Windows 会话。
+
 
 ## 快速开始
 
