@@ -40,6 +40,12 @@ internal sealed class HotkeyService : IDisposable
     /// <summary>按配置注册全局热键（静音 / 下一个 / 上一个）。</summary>
     public void Register()
     {
+        if (Application.Current?.Dispatcher is null || !Application.Current.Dispatcher.CheckAccess())
+        {
+            DiagnosticsService.Log("热键：Register 在非 UI 线程被调用，已忽略");
+            return;
+        }
+
         var config = _config();
         _hotkeySignature = BuildSignature(config);
         _status.Clear();
