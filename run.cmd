@@ -1,7 +1,9 @@
 @echo off
 chcp 65001 >nul
 REM ============================================================
-REM  MicSwitcher 运行脚本：构建后启动（弹设置窗口），cmd 自动退出
+REM  MicSwitcher run script: build then launch, this console exits.
+REM  Keep this file ASCII-only: cmd reads it as ANSI, and UTF-8
+REM  Chinese comments get misparsed into bogus commands.
 REM ============================================================
 setlocal
 

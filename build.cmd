@@ -1,10 +1,13 @@
 @echo off
 REM ============================================================
-REM  MicSwitcher 构建脚本
-REM  封装本机 .NET SDK 环境（SDK 装在 D:\TOOLS\dotnet-sdk，
-REM  且 C 盘用户目录受限，需要把 HOME/NuGet 重定向到 D 盘）。
-REM  用法：build.cmd            → 编译整个解决方案 (Debug)
-REM        build.cmd Release    → 编译 Release
+REM  MicSwitcher build script (whole solution)
+REM  Wraps the local .NET SDK environment: SDK lives in
+REM  D:\TOOLS\dotnet-sdk, and the C: user profile is read-only,
+REM  so HOME / NuGet are redirected to D:.
+REM    build.cmd            -> Debug
+REM    build.cmd Release    -> Release
+REM  Keep this file ASCII-only: cmd reads it as ANSI, and UTF-8
+REM  Chinese comments get misparsed into bogus commands.
 REM ============================================================
 setlocal
 

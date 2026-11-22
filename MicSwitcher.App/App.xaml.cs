@@ -1,12 +1,10 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Interop;
 using H.NotifyIcon;
 using MicSwitcher.Core.Audio;
 using MicSwitcher.Core.AutoSwitch;
 using MicSwitcher.Core.Config;
-using MicSwitcher.Core.Hotkeys;
 using MicSwitcher.Core.Startup;
 using MessageBox = System.Windows.MessageBox;
 
@@ -26,6 +24,12 @@ public partial class App : System.Windows.Application
     private TaskbarIcon _tray = null!;
     private SettingsWindow? _settingsWindow;
     private static System.Drawing.Icon? _trayIconKeepAlive;
+    private static HotkeyService? _hotkeyService;
+    private static readonly IReadOnlyDictionary<string, bool> EmptyStatus = new Dictionary<string, bool>();
+
+    /// <summary>各热键最近一次注册结果（供设置窗口显示冲突状态）。</summary>
+    public static IReadOnlyDictionary<string, bool> HotkeyStatus
+        => _hotkeyService?.Status ?? EmptyStatus;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -118,7 +122,8 @@ public partial class App : System.Windows.Application
 
         BuildTrayIcon();
         RefreshTrayMenu();
-        RegisterHotkeys();
+        _hotkeyService = new HotkeyService(() => _config, SafeToggleMute, forward => SafeCycle(forward), ShowBalloon);
+        _hotkeyService.Register();
 
         // 最小化启动：命令行 --minimized（开机自启）或配置里的「启动时最小化到托盘」都算
         bool minimized = e.Args.Contains("--minimized", StringComparer.OrdinalIgnoreCase)
@@ -448,120 +453,6 @@ public partial class App : System.Windows.Application
         });
     }
 
-    // ---------- 全局热键 ----------
-    private HwndSource? _hotkeySource;
-
-    /// <summary>按配置注册全局热键（静音 / 下一个 / 上一个）。</summary>
-    private void RegisterHotkeys()
-    {
-        _hotkeySignature = $"{_config.EnableHotkeys}|{_config.HotkeyMute}|{_config.HotkeyNext}|{_config.HotkeyPrev}|{_config.HotkeyMuteEnabled}{_config.HotkeyNextEnabled}{_config.HotkeyPrevEnabled}";
-        HotkeyStatus.Clear();
-
-        if (!_config.EnableHotkeys) { DiagnosticsService.Log("热键：配置里已关闭，跳过注册"); return; }
-
-        try
-        {
-            _hotkeySource = new HwndSource(new HwndSourceParameters("MicSwitcherHotkeyWnd")
-            {
-                Width = 0,
-                Height = 0,
-                WindowStyle = 0,
-                ExtendedWindowStyle = 0,
-            });
-            _hotkeySource.AddHook(HotkeyWndProc);
-
-            bool m = TryRegister(NativeMethods.HotkeyIdMute, "Mute", _config.HotkeyMute, "静音", _config.HotkeyMuteEnabled);
-            bool n = TryRegister(NativeMethods.HotkeyIdNext, "Next", _config.HotkeyNext, "下一个", _config.HotkeyNextEnabled);
-            bool p = TryRegister(NativeMethods.HotkeyIdPrev, "Prev", _config.HotkeyPrev, "上一个", _config.HotkeyPrevEnabled);
-            DiagnosticsService.Log($"热键注册: 静音={m} 下一个={n} 上一个={p}");
-
-            // 有失败的热键 → 托盘提示一次（不影响程序其余功能）
-            var failed = HotkeyStatus.Where(kv => !kv.Value).Select(kv => kv.Key switch
-            {
-                "Mute" => $"静音 {_config.HotkeyMute}",
-                "Next" => $"下一个 {_config.HotkeyNext}",
-                _ => $"上一个 {_config.HotkeyPrev}",
-            }).ToList();
-
-            if (failed.Count > 0)
-            {
-                Dispatcher.BeginInvoke(new Action(() =>
-                    ShowBalloon("热键被占用",
-                        string.Join("、", failed) + " 无法注册，请到「设置 → 全局快捷键」里更换。")),
-                    System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-            }
-        }
-        catch (Exception ex)
-        {
-            DiagnosticsService.Log("热键注册异常: " + ex.Message);
-        }
-    }
-
-    /// <summary>各热键最近一次注册结果（供设置窗口显示冲突状态）。</summary>
-    internal static readonly Dictionary<string, bool> HotkeyStatus = new();
-
-    private bool TryRegister(int id, string key, string? text, string label, bool enabled = true)
-    {
-        if (!enabled)
-        {
-            HotkeyStatus[key] = true;   // 未启用视为“无冲突”
-            DiagnosticsService.Log($"热键「{label}」未启用，跳过注册");
-            return true;
-        }
-
-        bool ok = false;
-
-        if (_hotkeySource is not null)
-        {
-            if (!HotkeyGesture.TryParse(text, out var gesture, out string? error))
-            {
-                DiagnosticsService.Log($"热键「{label}」无效（{text}）：{error}");
-            }
-            else
-            {
-                ok = NativeMethods.RegisterHotKey(_hotkeySource.Handle, id, gesture.RegisterModifiers, gesture.VirtualKey);
-                if (!ok) DiagnosticsService.Log($"热键「{label}」({gesture}) 注册失败，可能被其他程序占用");
-            }
-        }
-
-        HotkeyStatus[key] = ok;
-        return ok;
-    }
-
-    /// <summary>重新注册热键（设置窗口改完热键后调用）。</summary>
-    private void ReloadHotkeys()
-    {
-        UnregisterHotkeys();
-        RegisterHotkeys();
-    }
-
-    private void UnregisterHotkeys()
-    {
-        try
-        {
-            if (_hotkeySource is null) return;
-            NativeMethods.UnregisterHotKey(_hotkeySource.Handle, NativeMethods.HotkeyIdMute);
-            NativeMethods.UnregisterHotKey(_hotkeySource.Handle, NativeMethods.HotkeyIdNext);
-            NativeMethods.UnregisterHotKey(_hotkeySource.Handle, NativeMethods.HotkeyIdPrev);
-            _hotkeySource.Dispose();
-            _hotkeySource = null;
-        }
-        catch { /* 忽略 */ }
-    }
-
-    private IntPtr HotkeyWndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (msg != NativeMethods.WM_HOTKEY) return IntPtr.Zero;
-
-        switch (wParam.ToInt32())
-        {
-            case NativeMethods.HotkeyIdMute: SafeToggleMute(); handled = true; break;
-            case NativeMethods.HotkeyIdNext: SafeCycle(true); handled = true; break;
-            case NativeMethods.HotkeyIdPrev: SafeCycle(false); handled = true; break;
-        }
-        return IntPtr.Zero;
-    }
-
     // ---------- 设置窗口 ----------
     private void ShowSettings()
     {
@@ -607,17 +498,10 @@ public partial class App : System.Windows.Application
         catch (Exception ex) { DiagnosticsService.Log("应用托盘可见性失败: " + ex.Message); }
 
         // 热键配置变了才重新注册，避免每次拨开关都短暂注销
-        string signature = $"{_config.EnableHotkeys}|{_config.HotkeyMute}|{_config.HotkeyNext}|{_config.HotkeyPrev}|{_config.HotkeyMuteEnabled}{_config.HotkeyNextEnabled}{_config.HotkeyPrevEnabled}";
-        if (signature != _hotkeySignature)
-        {
-            _hotkeySignature = signature;
-            ReloadHotkeys();
-        }
+        _hotkeyService?.ReloadIfChanged(_config);
 
         RefreshTrayMenu();
     }
-
-    private string _hotkeySignature = "";
 
     /// <summary>副实例请求已运行的实例显示设置窗口。</summary>
     private static bool SignalExistingInstance()
@@ -636,7 +520,7 @@ public partial class App : System.Windows.Application
             DiagnosticsService.Log("单实例：未找到唤醒事件（对端可能是旧版本）");
         }
         catch (Exception ex) { DiagnosticsService.Log("单实例：发事件失败 " + ex.Message); }
-return false;
+        return false;
     }
 
     /// <summary>
@@ -699,7 +583,7 @@ return false;
         {
             if (_tray?.ContextMenu is { } menu) menu.IsOpen = false;
             _settingsWindow?.AllowClose(); // 放行设置窗口的关闭拦截
-            UnregisterHotkeys();
+            _hotkeyService?.Unregister();
         }
         catch (Exception ex)
         {
@@ -754,7 +638,7 @@ return false;
         DiagnosticsService.Log("退出：OnExit");
         // 不主动 ReleaseMutex：进程退出时内核会自动释放命名互斥量，
         // 且 ReleaseMutex 只能在持有它的线程调用（OnExit 可能在其他线程，会抛异常）。
-        UnregisterHotkeys();
+        _hotkeyService?.Dispose();
         _singleInstanceMutex?.Dispose();
         _singleInstanceMutex = null;
         base.OnExit(e);

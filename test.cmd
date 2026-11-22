@@ -1,6 +1,8 @@
 @echo off
 REM ============================================================
-REM  MicSwitcher 测试脚本
+REM  MicSwitcher test script (xunit)
+REM  Keep this file ASCII-only: cmd reads it as ANSI, and UTF-8
+REM  Chinese comments get misparsed into bogus commands.
 REM ============================================================
 setlocal
 
