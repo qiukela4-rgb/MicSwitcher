@@ -53,22 +53,7 @@ public sealed class AppServices : IDisposable
     /// <summary>按优先级顺序排好的麦克风列表（默认包含被排除的设备，方便界面上管理）。</summary>
     /// <param name="includeExcluded">false 时过滤掉配置里排除的设备（托盘菜单与自动切换用）。</param>
     public IReadOnlyList<AudioDeviceInfo> OrderedDevices(bool includeExcluded = true)
-    {
-        var devices = Audio.EnumerateDevices(AudioFlow.Capture);
-        var map = devices.ToDictionary(d => d.Id);
-
-        var ordered = Config.SortByPriority(devices.Select(d => d.Id))
-            .Where(map.ContainsKey)
-            .Select(id => map[id]);
-
-        if (!includeExcluded)
-            ordered = ordered.Where(d => !Config.ExcludedDevices.Contains(d.Id));
-
-        // 有别名就用别名显示
-        return ordered
-            .Select(d => d with { FriendlyName = Config.DisplayName(d.Id, d.FriendlyName) })
-            .ToList();
-    }
+        => DeviceListOrdering.Build(Audio.EnumerateDevices(AudioFlow.Capture), Config, includeExcluded);
 
     /// <summary>把配置里的灵敏度/排除列表/角色同步推给引擎（改完设置立即生效）。</summary>
     public void ApplyConfigToEngines()

@@ -132,7 +132,7 @@ Windows 麦克风切换工具（个人自用 + 学习），C# + WPF 实现。
 
 ## 测试
 
-`test.cmd` 跑全套 xunit 用例，当前 **72 个全部通过**，约 0.5 秒。
+`test.cmd` 跑全套 xunit 用例，当前 **103 个全部通过**，约 0.5 秒。
 
 | 测试类 | 用例 | 覆盖什么 |
 |---|---|---|
@@ -141,9 +141,13 @@ Windows 麦克风切换工具（个人自用 + 学习），C# + WPF 实现。
 | `SwitchPolicyTests` | 15 | 自动切换判定：静音、防抖、相对判据、平局、候选换人 |
 | `RecoveryPolicyTests` | 12 | 默认设备失效时的恢复目标：优先级、电平、全虚拟退化 |
 | `VirtualDeviceDetectorTests` | 16 | 虚拟声卡关键字识别（正例与真实麦克风反例） |
+| `ArrivalPolicyTests` | 9 | 新设备接入比对：空枚举保留基线、拔了再插算新到 |
+| `AppConfigTests` | 12 | 优先级排序、别名空值回退、配置序列化往返、旧配置缺字段兜底 |
+| `DeviceListOrderingTests` | 10 | 排序 → 排除 → 别名三层规则的叠加顺序 |
 | `AudioDeviceServiceTests` | 3 | 设备枚举不抛异常（无音频设备时得到空列表，不断言数量） |
 
-判定与恢复两块是纯函数，不依赖音频设备；`AudioDeviceServiceTests` 需要真实 Windows 会话。
+判定、恢复、接入、排序几块都是纯函数，不依赖音频设备；`AudioDeviceServiceTests`
+需要真实 Windows 会话。
 
 
 ## 快速开始
@@ -215,8 +219,10 @@ MicSwitcher/
 │   │   └── VirtualDeviceDetector.cs  # 按设备名识别虚拟声卡
 │   ├── AutoSwitch/SwitchPolicy.cs    # 切换判定规则（纯函数，可单测）
 │   ├── AutoSwitch/RecoveryPolicy.cs  # 默认设备失效时选谁接手（纯函数，可单测）
+│   ├── AutoSwitch/ArrivalPolicy.cs   # 新设备接入比对（纯函数，可单测）
 │   ├── AutoSwitch/LevelMonitor.cs    # 自动策略①：按电平选最佳麦
 │   ├── AutoSwitch/DeviceWatcher.cs   # 自动策略②：监听新麦克风接入
+│   ├── Config/DeviceListOrdering.cs  # 排序 → 排除 → 别名（纯函数，可单测）
 │   ├── Locking/DefaultGuard.cs       # 锁定守护（IMMNotificationClient + 轮询兜底）
 │   └── Startup/AutoStart.cs          # 开机自启（Run 注册表键）
 ├── MicSwitcher.App/             # WPF 外壳（托盘 + 设置窗口）

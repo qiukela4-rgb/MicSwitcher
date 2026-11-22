@@ -26,7 +26,16 @@ public sealed class AudioDeviceService
         var result = new List<AudioDeviceInfo>();
         foreach (var dev in enumerator.EnumerateAudioEndPoints(dataFlow, NAudio.CoreAudioApi.DeviceState.Active))
         {
-            result.Add(Snapshot(dev, flow, defaultId));
+            // 逐个设备隔离：某台设备正在移除、驱动异常时读属性会抛，
+            // 不能让它把整张设备列表一起带崩（否则自动切换会直接停摆）。
+            try
+            {
+                result.Add(Snapshot(dev, flow, defaultId));
+            }
+            catch
+            {
+                // 跳过这台设备，其余照常返回
+            }
         }
         return result;
     }
@@ -43,11 +52,19 @@ public sealed class AudioDeviceService
     {
         using var enumerator = new MMDeviceEnumerator();
         var dataFlow = ToDataFlow(flow);
+        var defaultId = GetDefaultId(enumerator, dataFlow);
+        if (defaultId is null) return null;
+
         foreach (var dev in enumerator.EnumerateAudioEndPoints(dataFlow, NAudio.CoreAudioApi.DeviceState.Active))
         {
-            var id = dev.ID;
-            if (id == GetDefaultId(enumerator, dataFlow))
-                return Snapshot(dev, flow, id);
+            string id;
+            try { id = dev.ID; }
+            catch { continue; }   // 设备正在移除，跳过
+
+            if (id != defaultId) continue;
+
+            try { return Snapshot(dev, flow, id); }
+            catch { return null; }
         }
         return null;
     }
@@ -134,12 +151,14 @@ public sealed class AudioDeviceService
 
     private static AudioDeviceInfo Snapshot(MMDevice dev, AudioFlow flow, string? defaultId)
     {
+        // 电平与静音读失败都不该影响设备本身可用性。
+        // 不限定 COMException：设备拔除瞬间可能抛别的类型。
         float peak;
         bool muted;
         try { peak = dev.AudioMeterInformation.MasterPeakValue; }
-        catch (COMException) { peak = 0f; }
+        catch { peak = 0f; }
         try { muted = dev.AudioEndpointVolume.Mute; }
-        catch (COMException) { muted = false; }
+        catch { muted = false; }
 
         return new AudioDeviceInfo(
             Id: dev.ID,
