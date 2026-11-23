@@ -15,15 +15,15 @@ using Color = System.Windows.Media.Color;
 namespace MicSwitcher.App;
 
 /// <summary>
-/// 主窗口：左侧「手动 / 自动」两个互斥拨动开关切换模式，
-/// 右侧是麦克风设备卡片（支持上下箭头与拖动排序），左下角进入详细设置。
+/// 主窗口：左侧「手动 / 自动 / 锁定」三个互斥单选切换模式，
+/// 自动策略只在自动模式下展开；右侧是麦克风设备卡片（支持上下箭头与拖动排序），
+/// 左下角进入详细设置。
 /// </summary>
 public partial class SettingsWindow : Window
 {
     private readonly AppServices _services;
     private readonly AppConfig _config;
     private bool _realExit;     // 托盘「退出」时置 true，允许窗口真正关闭
-    private bool _syncing;      // 程序化改开关状态时置 true，避免事件互相触发
     private string _lastSignature = "";   // 上次渲染的设备快照，用于跳过无变化的刷新
     private PreferencesWindow? _preferences;
 
@@ -77,28 +77,7 @@ public partial class SettingsWindow : Window
 
     // ================= 初始化 =================
 
-    private void InitMode()
-    {
-        _syncing = true;
-
-        ModeManualToggle.IsChecked = _services.Mode != WorkMode.Auto;
-        ModeAutoToggle.IsChecked = _services.Mode == WorkMode.Auto;
-        LockToggle.IsChecked = _services.Mode == WorkMode.Locked;
-
-        StrategyByLevel.IsChecked = _config.AutoStrategy == AutoStrategy.ByLevel;
-        StrategyByNewDevice.IsChecked = _config.AutoStrategy == AutoStrategy.ByNewDevice;
-
-        _syncing = false;
-
-        ModeManualToggle.Checked += ModeManual_Changed;
-        ModeManualToggle.Unchecked += ModeManual_Changed;
-        ModeAutoToggle.Checked += ModeAuto_Changed;
-        ModeAutoToggle.Unchecked += ModeAuto_Changed;
-        LockToggle.Checked += Lock_Changed;
-        LockToggle.Unchecked += Lock_Changed;
-        StrategyByLevel.Checked += Strategy_Changed;
-        StrategyByNewDevice.Checked += Strategy_Changed;
-    }
+    private void InitMode() => SyncModeUi();
 
     // ================= 刷新（带节流） =================
 
@@ -144,23 +123,23 @@ public partial class SettingsWindow : Window
         SyncModeUi();
     }
 
-    /// <summary>把左栏开关与策略单选同步成当前状态（不触发事件）。</summary>
+    /// <summary>
+    /// 把左栏三个模式单选与策略单选同步成当前状态。
+    /// 单选的 Click 只在用户点击时触发，程序化设置 IsChecked 不会误切换模式。
+    /// </summary>
     private void SyncModeUi()
     {
-        _syncing = true;
+        ModeManual.IsChecked = _services.Mode == WorkMode.Manual;
+        ModeAuto.IsChecked = _services.Mode == WorkMode.Auto;
+        ModeLocked.IsChecked = _services.Mode == WorkMode.Locked;
 
-        ModeManualToggle.IsChecked = _services.Mode != WorkMode.Auto;
-        ModeAutoToggle.IsChecked = _services.Mode == WorkMode.Auto;
-        LockToggle.IsChecked = _services.Mode == WorkMode.Locked;
+        StrategyByLevel.IsChecked = _config.AutoStrategy == AutoStrategy.ByLevel;
+        StrategyByNewDevice.IsChecked = _config.AutoStrategy == AutoStrategy.ByNewDevice;
 
-        StrategyByLevel.IsChecked = _services.AutoStrategy == AutoStrategy.ByLevel;
-        StrategyByNewDevice.IsChecked = _services.AutoStrategy == AutoStrategy.ByNewDevice;
-
-        bool autoEnabled = _services.Mode == WorkMode.Auto;
-        StrategyByLevel.IsEnabled = autoEnabled;
-        StrategyByNewDevice.IsEnabled = autoEnabled;
-
-        _syncing = false;
+        // 手动 / 锁定模式下把自动策略整块收起来，不再和模式选项混在一起
+        AutoOptions.Visibility = _services.Mode == WorkMode.Auto
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void NotifyChanged() => Changed?.Invoke(this, EventArgs.Empty);
@@ -169,38 +148,51 @@ public partial class SettingsWindow : Window
 
     // ================= 模式切换 =================
 
-    private void ModeManual_Changed(object sender, RoutedEventArgs e)
+    private void ModeManual_Click(object sender, RoutedEventArgs e) => ChangeMode(WorkMode.Manual);
+
+    private void ModeAuto_Click(object sender, RoutedEventArgs e) => ChangeMode(WorkMode.Auto);
+
+    private void ModeLocked_Click(object sender, RoutedEventArgs e) => ChangeMode(WorkMode.Locked);
+
+    private void ChangeMode(WorkMode mode)
     {
-        if (_syncing || !IsLoaded) return;
+        if (!IsLoaded) return;
 
         _services.Config = _config;
-        _services.SetManual();
+        switch (mode)
+        {
+            case WorkMode.Auto:
+                _services.SetAuto(_config.AutoStrategy);
+                break;
+
+            case WorkMode.Locked:
+                if (_services.Audio.GetDefaultDeviceId(AudioFlow.Capture) is null)
+                {
+                    MessageBox.Show("没有可锁定的麦克风。", "MicSwitcher");
+                    Refresh(force: true);
+                    return;
+                }
+                _services.LockCurrent();
+                break;
+
+            default:
+                _services.SetManual();
+                break;
+        }
 
         Refresh(force: true);
         NotifyChanged();
     }
 
-    private void ModeAuto_Changed(object sender, RoutedEventArgs e)
+    private void StrategyByLevel_Click(object sender, RoutedEventArgs e)
+        => ChangeStrategy(AutoStrategy.ByLevel);
+
+    private void StrategyByNewDevice_Click(object sender, RoutedEventArgs e)
+        => ChangeStrategy(AutoStrategy.ByNewDevice);
+
+    private void ChangeStrategy(AutoStrategy strategy)
     {
-        if (_syncing || !IsLoaded) return;
-
-        _services.Config = _config;
-        if (ModeAutoToggle.IsChecked == true)
-            _services.SetAuto(_config.AutoStrategy);
-        else
-            _services.SetManual();   // 我不允许「两个都关」，退回手动
-
-        Refresh(force: true);
-        NotifyChanged();
-    }
-
-    private void Strategy_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_syncing || !IsLoaded) return;
-
-        var strategy = StrategyByNewDevice.IsChecked == true
-            ? AutoStrategy.ByNewDevice
-            : AutoStrategy.ByLevel;
+        if (!IsLoaded) return;
 
         _config.AutoStrategy = strategy;
         _config.Save();
@@ -209,30 +201,6 @@ public partial class SettingsWindow : Window
 
         if (_services.Mode == WorkMode.Auto)
             _services.SetAuto(strategy);
-
-        Refresh(force: true);
-        NotifyChanged();
-    }
-
-    private void Lock_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_syncing || !IsLoaded) return;
-
-        _services.Config = _config;
-        if (LockToggle.IsChecked == true)
-        {
-            if (_services.Audio.GetDefaultDeviceId(AudioFlow.Capture) is null)
-            {
-                MessageBox.Show("没有可锁定的麦克风。", "MicSwitcher");
-                Refresh(force: true);
-                return;
-            }
-            _services.LockCurrent();
-        }
-        else
-        {
-            _services.Unlock();
-        }
 
         Refresh(force: true);
         NotifyChanged();

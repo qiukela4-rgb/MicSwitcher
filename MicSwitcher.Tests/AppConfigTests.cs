@@ -104,6 +104,7 @@ public class AppConfigTests
         {
             StartMinimized = true,
             AutoStrategy = AutoStrategy.ByNewDevice,
+            Mode = nameof(WorkMode.Locked),
             DevicePriority = new List<string> { "B", "A" },
             ExcludedDevices = new List<string> { "V" },
             DeviceAliases = { ["id-1"] = "桌面麦" },
@@ -116,6 +117,7 @@ public class AppConfigTests
 
         Assert.Equal(config.StartMinimized, back.StartMinimized);
         Assert.Equal(AutoStrategy.ByNewDevice, back.AutoStrategy);
+        Assert.Equal("Locked", back.Mode);
         Assert.Equal(config.DevicePriority, back.DevicePriority);
         Assert.Equal(config.ExcludedDevices, back.ExcludedDevices);
         Assert.Equal("桌面麦", back.DeviceAliases["id-1"]);
@@ -140,8 +142,38 @@ public class AppConfigTests
 
         Assert.True(back.StartMinimized);
         Assert.Equal(AutoStrategy.ByLevel, back.AutoStrategy);
+        Assert.Equal("Manual", back.Mode);
         Assert.Equal(0.004f, back.SilenceThreshold);
         Assert.NotNull(back.DevicePriority);
         Assert.NotNull(back.DeviceAliases);
+    }
+
+    // ---------- 模式记忆 ----------
+
+    [Theory]
+    [InlineData("Manual", WorkMode.Manual)]
+    [InlineData("auto", WorkMode.Auto)]
+    [InlineData("LOCKED", WorkMode.Locked)]
+    public void 模式名能解析回工作模式(string text, WorkMode expected)
+    {
+        Assert.Equal(expected, WorkModeParser.Parse(text));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("胡乱写的")]
+    public void 无效或缺失的模式回退到手动(string? text)
+    {
+        Assert.Equal(WorkMode.Manual, WorkModeParser.Parse(text));
+    }
+
+    [Fact]
+    public void 模式以名字写进配置而不是数字()
+    {
+        var json = JsonSerializer.Serialize(new AppConfig { Mode = nameof(WorkMode.Auto) });
+
+        Assert.Contains("\"Auto\"", json);
+        Assert.DoesNotContain("\"Mode\":2", json);
     }
 }

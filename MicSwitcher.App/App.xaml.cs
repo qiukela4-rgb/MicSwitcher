@@ -91,9 +91,9 @@ public partial class App : System.Windows.Application
 
         _services = new AppServices { Config = _config };
         _initialized = true;
-        _services.ApplyStrategy(_config.AutoStrategy);
         _services.ApplyConfigToEngines();
-        DiagnosticsService.Log($"初始化：服务就绪 {initWatch.ElapsedMilliseconds} ms");
+        _services.RestoreMode();   // 恢复上次的手动 / 自动 / 锁定，含开机自启
+        DiagnosticsService.Log($"初始化：服务就绪 {initWatch.ElapsedMilliseconds} ms，模式={_services.Mode}");
 
         var trayHost = new TrayIconHost(() => _config, ShowSettings);
         _trayHost = trayHost;

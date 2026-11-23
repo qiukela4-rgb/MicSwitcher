@@ -70,6 +70,39 @@ public sealed class AppServices : IDisposable
 
     // ---------- 模式 ----------
 
+    // 恢复上次模式时不写盘，避免每次启动都重写一次 settings.json
+    private bool _suppressModePersist;
+
+    /// <summary>把当前模式写回配置，下次启动（含开机自启）恢复。</summary>
+    private void PersistMode()
+    {
+        if (_suppressModePersist) return;
+        Config.Mode = Mode.ToString();
+        Config.Save();
+    }
+
+    /// <summary>按配置恢复上次的工作模式；在引擎配置推完之后调用。</summary>
+    public void RestoreMode()
+    {
+        _suppressModePersist = true;
+        try
+        {
+            switch (WorkModeParser.Parse(Config.Mode))
+            {
+                case WorkMode.Auto:
+                    SetAuto(Config.AutoStrategy);
+                    break;
+                case WorkMode.Locked:
+                    LockCurrent();
+                    break;
+                default:
+                    SetManual();
+                    break;
+            }
+        }
+        finally { _suppressModePersist = false; }
+    }
+
     /// <summary>进入手动模式：停止自动和守护，保留当前默认设备。</summary>
     public void SetManual()
     {
@@ -77,6 +110,7 @@ public sealed class AppServices : IDisposable
         Watcher.Stop();
         Guard.StopGuarding();
         Mode = WorkMode.Manual;
+        PersistMode();
     }
 
     /// <summary>同步「当前自动策略」到界面状态，不启动/停止引擎（用于启动时按配置回填）。</summary>
@@ -99,6 +133,7 @@ public sealed class AppServices : IDisposable
             Watcher.Start();
 
         Mode = WorkMode.Auto;
+        PersistMode();
     }
 
     /// <summary>锁定当前默认麦克风。</summary>
@@ -110,6 +145,7 @@ public sealed class AppServices : IDisposable
         if (current is null) return;
         Guard.StartGuarding(current);
         Mode = WorkMode.Locked;
+        PersistMode();
     }
 
     /// <summary>解除锁定，回到手动模式。</summary>
@@ -117,6 +153,7 @@ public sealed class AppServices : IDisposable
     {
         Guard.StopGuarding();
         Mode = WorkMode.Manual;
+        PersistMode();
     }
 
     // ---------- 「按新设备」策略 ----------
@@ -151,17 +188,4 @@ public sealed class AppServices : IDisposable
         Watcher.Dispose();
         Guard.Dispose();
     }
-}
-
-/// <summary>工作模式。</summary>
-public enum WorkMode
-{
-    /// <summary>手动：不自动干预，仅响应切设备/静音命令。</summary>
-    Manual,
-
-    /// <summary>锁定：守护当前默认麦克风不被改动。</summary>
-    Locked,
-
-    /// <summary>自动：按声音或按新设备自动切换。</summary>
-    Auto,
 }

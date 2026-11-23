@@ -32,59 +32,47 @@
                 <StackPanel>
                     <TextBlock Text="模式" Style="{StaticResource GroupTitle}"/>
 
-                    <Grid Margin="0,0,0,12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <RadioButton x:Name="ModeManual" GroupName="WorkMode" Margin="0,0,0,10"
+                                 Click="ModeManual_Click">
+                        <StackPanel>
                             <TextBlock Text="✋ 手动" FontSize="14"/>
                             <TextBlock Text="自己点着换" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
                         </StackPanel>
-                        <CheckBox Grid.Column="1" x:Name="ModeManualToggle" Style="{StaticResource ToggleSwitch}"
-                                  Checked="ModeManual_Changed" Unchecked="ModeManual_Changed"/>
-                    </Grid>
+                    </RadioButton>
 
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <RadioButton x:Name="ModeAuto" GroupName="WorkMode" Margin="0,0,0,10"
+                                 Click="ModeAuto_Click">
+                        <StackPanel>
                             <TextBlock Text="🤖 自动" FontSize="14"/>
                             <TextBlock Text="按策略自动切" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
                         </StackPanel>
-                        <CheckBox Grid.Column="1" x:Name="ModeAutoToggle" Style="{StaticResource ToggleSwitch}"
-                                  Checked="ModeAuto_Changed" Unchecked="ModeAuto_Changed"/>
-                    </Grid>
-
-                    <Border Height="1" Background="#FFEEEEEE" Margin="0,12"/>
-
-                    <TextBlock Text="自动策略" Style="{StaticResource GroupTitle}"/>
-                    <RadioButton x:Name="StrategyByLevel" GroupName="Strategy" Margin="0,0,0,8"
-                                 Checked="Strategy_Changed">
-                        <TextBlock Text="🎚 按声音大小" FontSize="13"/>
                     </RadioButton>
-                    <RadioButton x:Name="StrategyByNewDevice" GroupName="Strategy"
-                                 Checked="Strategy_Changed">
-                        <TextBlock Text="🔌 按新设备" FontSize="13"/>
-                    </RadioButton>
-                    <TextBlock Text="插上麦克风就自动切过去。" Style="{StaticResource Hint}" Margin="20,6,0,0"/>
 
-                    <Border Height="1" Background="#FFEEEEEE" Margin="0,12"/>
-
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                            <TextBlock Text="🔒 锁定当前麦" FontSize="13"/>
+                    <RadioButton x:Name="ModeLocked" GroupName="WorkMode" Margin="0,0,0,4"
+                                 Click="ModeLocked_Click">
+                        <StackPanel>
+                            <TextBlock Text="🔒 锁定当前麦" FontSize="14"/>
                             <TextBlock Text="被改动就自动改回" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
                         </StackPanel>
-                        <CheckBox Grid.Column="1" x:Name="LockToggle" Style="{StaticResource ToggleSwitch}"
-                                  Checked="Lock_Changed" Unchecked="Lock_Changed"/>
-                    </Grid>
+                    </RadioButton>
+
+                    <!-- 自动策略只在自动模式展开，手动 / 锁定模式下收起 -->
+                    <Border x:Name="AutoOptions" Margin="0,12,0,0" Padding="10,8"
+                            BorderBrush="#FFCDE7D2" BorderThickness="1" CornerRadius="8"
+                            Background="#FFF7FCF8" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="自动策略" Style="{StaticResource GroupTitle}" Margin="0,0,0,4"/>
+                            <RadioButton x:Name="StrategyByLevel" GroupName="Strategy" Margin="0,0,0,6"
+                                         Click="StrategyByLevel_Click">
+                                <TextBlock Text="🎚 按声音大小" FontSize="13"/>
+                            </RadioButton>
+                            <RadioButton x:Name="StrategyByNewDevice" GroupName="Strategy"
+                                         Click="StrategyByNewDevice_Click">
+                                <TextBlock Text="🔌 按新设备" FontSize="13"/>
+                            </RadioButton>
+                            <TextBlock Text="插上麦克风就自动切过去。" Style="{StaticResource Hint}" Margin="20,6,0,0"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 

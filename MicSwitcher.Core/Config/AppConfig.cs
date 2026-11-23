@@ -3,6 +3,28 @@ using System.Text.Json.Serialization;
 
 namespace MicSwitcher.Core.Config;
 
+/// <summary>工作模式。</summary>
+public enum WorkMode
+{
+    /// <summary>手动：不自动干预，仅响应切设备/静音命令。</summary>
+    Manual,
+
+    /// <summary>锁定：守护当前默认麦克风不被改动。</summary>
+    Locked,
+
+    /// <summary>自动：按声音或按新设备自动切换。</summary>
+    Auto,
+}
+
+/// <summary>工作模式的文本解析：配置里存名字，读回来时容错。</summary>
+public static class WorkModeParser
+{
+    public static WorkMode Parse(string? value)
+        => Enum.TryParse<WorkMode>(value, ignoreCase: true, out var mode) && Enum.IsDefined(mode)
+            ? mode
+            : WorkMode.Manual;
+}
+
 /// <summary>自动模式的切换策略。</summary>
 public enum AutoStrategy
 {
@@ -34,6 +56,9 @@ public sealed class AppConfig
     /// <summary>自动模式的策略（按声音 / 按新设备）。</summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public AutoStrategy AutoStrategy { get; set; } = AutoStrategy.ByLevel;
+
+    /// <summary>要记住的工作模式，存名字（Manual / Auto / Locked）便于直接改配置。</summary>
+    public string Mode { get; set; } = nameof(WorkMode.Manual);
 
     /// <summary>切默认麦时是否同时设置「通信设备」角色（通话软件才会跟着变）。</summary>
     public bool SyncCommunicationRole { get; set; } = true;
