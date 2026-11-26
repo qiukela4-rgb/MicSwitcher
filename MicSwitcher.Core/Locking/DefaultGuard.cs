@@ -13,6 +13,34 @@ public sealed class GuardTriggeredEventArgs : EventArgs
     public string? IntruderName { get; init; } // 试图抢默认的设备名
 }
 
+/// <summary>外部抢占的节流规则：避免两个软件每秒互抢默认设备。</summary>
+public static class GuardSnoozePolicy
+{
+    /// <summary>两次还原间隔小于这个时长，算作一次连续抢占。</summary>
+    public static readonly TimeSpan BurstWindow = TimeSpan.FromMilliseconds(1500);
+
+    /// <summary>连续抢占达到这个次数，判定外部软件持续接管，开始让路。</summary>
+    public const int BurstThreshold = 2;
+
+    /// <summary>让路时长。</summary>
+    public static readonly TimeSpan SnoozeDuration = TimeSpan.FromSeconds(8);
+
+    /// <summary>
+    /// 判定本次抢占是否应触发让路，并返回新的连击计数。
+    /// 调用方负责在让路结束后把计数清零。
+    /// </summary>
+    public static bool ShouldSnooze(TimeSpan sinceLastRestore, int priorBurstCount, out int newBurstCount)
+    {
+        if (sinceLastRestore < BurstWindow)
+        {
+            newBurstCount = priorBurstCount + 1;
+            return newBurstCount >= BurstThreshold;
+        }
+        newBurstCount = 0;
+        return false;
+    }
+}
+
 /// <summary>
 /// 默认设备锁定守护。
 /// 锁定某个录音设备后，一旦检测到默认设备被改成别的，立即改回。
@@ -29,6 +57,15 @@ public sealed class DefaultGuard : IDisposable, IMMNotificationClient
     private bool _enabled;
     private bool _disposed;
     private MMDeviceEnumerator? _enumerator; // 保持引用，防止 COM 回调被回收
+
+    // 外部软件（语音输入 / 虚拟声卡）持续抢默认设备时临时让路，
+    // 避免两个程序每秒互抢：用户听不到声音，还会在短时间内堆积大量 COM 调用与通知。
+    private DateTime _lastRestore = DateTime.MinValue;
+    private int _restoreBurstCount;
+    private DateTime _snoozeUntil = DateTime.MinValue;
+
+    /// <summary>是否因外部持续抢占而暂时让路（不再抢回）。</summary>
+    public bool IsSnoozed => DateTime.Now < _snoozeUntil;
 
     /// <summary>守护因外部改动而还原时触发。</summary>
     public event EventHandler<GuardTriggeredEventArgs>? GuardTriggered;
@@ -94,6 +131,8 @@ public sealed class DefaultGuard : IDisposable, IMMNotificationClient
             _enabled = false;
             _lockedDeviceId = null;
             _lockedDeviceName = null;
+            _restoreBurstCount = 0;
+            _snoozeUntil = DateTime.MinValue;
             _pollTimer.Stop();
         }
     }
@@ -132,6 +171,22 @@ public sealed class DefaultGuard : IDisposable, IMMNotificationClient
 
         var current = _audio.GetDefaultDeviceId(AudioFlow.Capture);
         if (current is null || current == lockedId) return;
+
+        // 让路期内不抢回：语音输入这类软件接管默认设备时，硬抢只会让它收不到声音
+        if (IsSnoozed) return;
+
+        // 高频抢占检测：判定外部软件持续接管时让路，避免两边互抢
+        var now = DateTime.Now;
+        if (GuardSnoozePolicy.ShouldSnooze(now - _lastRestore, _restoreBurstCount, out int burst))
+        {
+            _snoozeUntil = now.Add(GuardSnoozePolicy.SnoozeDuration);
+            _restoreBurstCount = 0;
+            Error?.Invoke(this, new InvalidOperationException(
+                $"检测到其他软件持续切换麦克风，已临时让路 {(int)GuardSnoozePolicy.SnoozeDuration.TotalSeconds} 秒。若在用语音输入，建议切到手动模式。"));
+            return;
+        }
+        _restoreBurstCount = burst;
+        _lastRestore = now;
 
         // 默认被改了 → 改回锁定的设备
         string? intruder = devices.FirstOrDefault(d => d.Id == current)?.FriendlyName;

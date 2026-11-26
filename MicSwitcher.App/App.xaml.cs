@@ -26,6 +26,19 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // 兜底：未处理异常过去直接终止进程，日志里什么都没有（表现为「无声闪退」）。
+        // 这里接住并写盘，下次能直接从日志看到崩在哪。
+        DispatcherUnhandledException += (_, args) =>
+        {
+            DiagnosticsService.Log("=== 未处理 UI 异常 ===" + args.Exception);
+            // 托盘问题不要因为一次异常就没了；其余异常也不退出，尽量保住程序
+            args.Handled = true;
+            try { _trayHost?.ShowNotification(" MicSwitcher 遇到问题", args.Exception.Message); }
+            catch { /* 通知失败不影响兜底 */ }
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            DiagnosticsService.Log("=== 未处理域异常（可能导致退出）===" + args.ExceptionObject);
+
         DiagnosticsService.CheckIntegrityLevel();
 
         // ---- 单实例：已经有实例在跑 → 直接把它的窗口叫出来，然后自己退出 ----
